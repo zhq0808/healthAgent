@@ -1,0 +1,50 @@
+# ---- 敏感数据 / 密钥（绝不入库）----
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+config.local.*
+
+# 真实用户健康数据（PHI）
+data/
+*.db
+*.sqlite
+*.sqlite3
+uploads/
+audio/
+photos/
+
+# ---- Go ----
+# 编译产物
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+/healthAgent
+
+# 测试与覆盖率
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Go 工作区
+go.work
+go.work.sum
+vendor/
+
+# ---- 编辑器 / 系统 ----
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ---- 日志 ----
+*.log
+logs/
