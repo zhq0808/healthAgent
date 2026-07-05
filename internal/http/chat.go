@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"healthAgent/internal/intent"
+	"healthAgent/internal/model"
 )
 
 // chatRequest 是 POST /api/v1/chat 的请求体。
@@ -20,18 +21,14 @@ type cardPayload struct {
 	Type string `json:"type"`
 }
 
-// chatReply 是对话回复体。Reply 为文本回复；Card 可选，由后端按意图决定是否附带。
+// chatReply 是对话回复体。Reply 为文本回复；Intent 为识别出的意图；Card 可选。
 type chatReply struct {
-	Reply string       `json:"reply"`
-	Card  *cardPayload `json:"card,omitempty"`
+	Reply  string       `json:"reply"`
+	Intent string       `json:"intent,omitempty"`
+	Card   *cardPayload `json:"card,omitempty"`
 }
 
-// chatHandler 处理对话请求：校验入参 → 调 DeepSeek → 返回真回复。
-//
-// S1-b（当前）：真调 DeepSeek。两处关键：
-//   - context 超时：从请求 context 派生一个带 deadline 的 context 传给 LLM，
-//     DeepSeek 卡住或客户端断开时能主动取消，不把 handler goroutine 挂死。
-//   - 错误降级：LLM 失败不把 5xx 甩给前端，返回一句友好兜底，真错误进日志。
+// chatHandler 处理对话请求：校验入参 → 意图识别 → 分流 → 调 LLM → 返回。
 func (s *Server) chatHandler(c *gin.Context) {
 	var req chatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -44,25 +41,37 @@ func (s *Server) chatHandler(c *gin.Context) {
 		return
 	}
 
-	// 从请求 context 派生带超时的 context：既继承「客户端断开即取消」，又加一层调用超时上限。
 	ctx, cancel := context.WithTimeout(c.Request.Context(), s.llm.Timeout())
 	defer cancel()
 
+	traceID := TraceIDFromContext(c.Request.Context())
+	userID := string(model.DefaultUserID)
+
+	// 意图识别（优先 LLM，失败走关键词兜底）；后续按意图分流到各处理链路。
+	it := s.classifyIntent(ctx, message, traceID, userID)
+
 	reply, err := s.llm.Chat(ctx, message)
 	if err != nil {
-		// 业务层降级：给用户一句友好兜底，真错误只进日志，避免把内部细节暴露给前端。
 		s.log.Warn("调用大模型失败，降级返回兜底回复",
-			"error", err,
-			"trace_id", TraceIDFromContext(c.Request.Context()),
-		)
+			"trace_id", traceID, "user_id", userID, "error", err)
 		ok(c, chatReply{Reply: "抱歉，我现在有点忙，稍后再问我一次好吗？"})
 		return
 	}
+	ok(c, chatReply{Reply: reply, Intent: it})
+}
 
-	// 意图识别在后端完成：命中则附带结构化卡片，前端只负责渲染。
-	resp := chatReply{Reply: reply}
-	if cardType, matched := intent.Resolve(message); matched {
-		resp.Card = &cardPayload{Type: cardType}
+// classifyIntent 优先用 LLM 识别意图，失败时降级到关键词兜底。
+// 两条路径都带 trace_id/user_id 日志，便于按请求链路定位问题。
+func (s *Server) classifyIntent(ctx context.Context, message, traceID, userID string) string {
+	res, err := s.llm.ClassifyIntent(ctx, message)
+	if err != nil {
+		it := intent.Fallback(message)
+		s.log.Warn("意图识别降级：LLM 失败，走关键词兜底",
+			"trace_id", traceID, "user_id", userID, "intent", it, "error", err)
+		return it
 	}
-	ok(c, resp)
+	s.log.Info("意图识别成功",
+		"trace_id", traceID, "user_id", userID,
+		"intent", res.Intent, "confidence", res.Confidence)
+	return res.Intent
 }

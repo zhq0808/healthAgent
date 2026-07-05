@@ -12,13 +12,13 @@ import (
 
 // Server 持有 HTTP 层依赖，并挂载路由。
 type Server struct {
-	llm    *llm.Client
+	llm    *llm.DeepSeekClient
 	log    *slog.Logger
 	engine *gin.Engine
 }
 
 // NewServer 构建 HTTP Server 并注册路由与中间件。
-func NewServer(llmClient *llm.Client, log *slog.Logger) *Server {
+func NewServer(llmClient *llm.DeepSeekClient, log *slog.Logger) *Server {
 	gin.SetMode(gin.ReleaseMode)
 	s := &Server{
 		llm:    llmClient,

@@ -44,7 +44,7 @@ func run() error {
 	if cfg.LLM.APIKey == "" {
 		log.Warn("未配置 DEEPSEEK_API_KEY，对话将返回降级兜底回复（请在 .env 中填入）")
 	}
-	llmClient := llm.New(cfg.LLM.APIKey, cfg.LLM.BaseURL, cfg.LLM.Model, time.Duration(cfg.LLM.TimeoutSeconds)*time.Second)
+	llmClient := llm.NewDeepSeekClient(cfg.LLM.APIKey, cfg.LLM.BaseURL, cfg.LLM.Model, time.Duration(cfg.LLM.TimeoutSeconds)*time.Second)
 
 	// 4. 构建 HTTP Server
 	handler := apphttp.NewServer(llmClient, log).Handler()
