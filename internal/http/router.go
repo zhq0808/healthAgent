@@ -7,20 +7,23 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"healthAgent/internal/llm"
 	"healthAgent/internal/store"
 )
 
 // Server 持有 HTTP 层依赖，并挂载路由。
 type Server struct {
 	store *store.Store
+	llm   *llm.Client
 	log   *slog.Logger
 	mux   *chi.Mux
 }
 
 // NewServer 构建 HTTP Server 并注册路由与中间件。
-func NewServer(st *store.Store, log *slog.Logger) *Server {
+func NewServer(st *store.Store, llmClient *llm.Client, log *slog.Logger) *Server {
 	s := &Server{
 		store: st,
+		llm:   llmClient,
 		log:   log,
 		mux:   chi.NewRouter(),
 	}

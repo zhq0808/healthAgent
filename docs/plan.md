@@ -53,8 +53,8 @@
 ---
 
 ## ▶ 当前开工：M1 / S1 裸对话
-- [ ] **S1-a 管道打通**：Go 加 `POST /api/v1/chat` 空 handler，先返回写死 `{"reply":"pong"}` → 前端 `send()` 改调它 → 验证前后端通
-- [ ] **S1-b 接 DeepSeek**：handler 真调 DeepSeek（读 `.env` key、`context` 超时、错误降级）→ 返回真回复
+- [x] **S1-a 管道打通**：Go 加 `POST /api/v1/chat` 空 handler，先返回写死 `{"reply":"pong"}` → 前端 `send()` 改调它 → 验证前后端通 ✅ 浏览器端到端验证通过（真实 UTF-8 回显正确）
+- [x] **S1-b 接 DeepSeek**：handler 真调 DeepSeek（读 `.env` key、`context` 超时、错误降级）→ 返回真回复 ✅ 已接线（`internal/llm` 裸 net/http 客户端）；降级兜底路径已验证（无 key → 友好兜底 + 日志记真错误）。**待你在 `.env` 填入真 key 后可看真回复。**
 - [ ] **S1-c 前端态**：把假的 `setTimeout` 打字动画接到真请求的 loading/错误态上
 
 > S1 不碰数据库、不做规则、不做抽取。就是把「聊天」从假变真。

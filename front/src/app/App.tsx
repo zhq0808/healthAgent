@@ -172,16 +172,15 @@ function InlineCard({ card }: { card: CardPayload }) {
 }
 
 // ── Chat (main page) ──────────────────────────────────────────────────────────
-function ChatCore({ goTo }: { goTo: (t: Tab) => void }) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 1, role: "ai", time: "09:00",
-      text: "你好，我是你的健康管理助手 🌿\n\n可以问我关于饮食、运动、睡眠的任何问题，或者直接说「今天吃什么」「打卡任务」「今日数据」——我会帮你一键查看。",
-    },
-  ]);
+function ChatCore({ goTo, messages, setMessages, isTyping, setIsTyping }: {
+  goTo: (t: Tab) => void;
+  messages: Message[];
+  setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
+  isTyping: boolean;
+  setIsTyping: React.Dispatch<React.SetStateAction<boolean>>;
+}) {
   const [input, setInput] = useState("");
   const [isRecording, setIsRecording] = useState(false);
-  const [isTyping, setIsTyping] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -590,6 +589,16 @@ function BottomNav({ active, setTab }: { active: Tab; setTab: (t: Tab) => void }
 export default function App() {
   const [tab, setTab] = useState<Tab | "chat">("chat");
 
+  // 聊天状态提升到 App（跨 tab 不卸载的公共祖先），
+  // 否则切走时 ChatCore 被卸载，其内部 useState 会被销毁，导致对话丢失。
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      id: 1, role: "ai", time: "09:00",
+      text: "你好，我是你的健康管理助手 🌿\n\n可以问我关于饮食、运动、睡眠的任何问题，或者直接说「今天吃什么」「打卡任务」「今日数据」——我会帮你一键查看。",
+    },
+  ]);
+  const [isTyping, setIsTyping] = useState(false);
+
   const titles: Record<string, string> = {
     chat: "健康助手",
     home: "健康管理",
@@ -628,7 +637,15 @@ export default function App() {
 
         {/* Content */}
         <main className="flex-1 px-4 pt-4 pb-28 overflow-y-auto flex flex-col">
-          {tab === "chat" && <ChatCore goTo={(t) => setTab(t)} />}
+          {tab === "chat" && (
+            <ChatCore
+              goTo={(t) => setTab(t)}
+              messages={messages}
+              setMessages={setMessages}
+              isTyping={isTyping}
+              setIsTyping={setIsTyping}
+            />
+          )}
           {tab === "home" && (
             <div className="space-y-4">
               {/* Home — compact overview with chat CTA */}
