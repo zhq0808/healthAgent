@@ -1,4 +1,4 @@
-package model
+package models
 
 // UserID 是用户标识。
 type UserID string

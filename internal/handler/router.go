@@ -1,5 +1,5 @@
-// Package http 提供 HTTP 接口层：路由、中间件、DTO、统一响应。
-package http
+// Package handler 提供 HTTP 接口层：路由、中间件、DTO、统一响应。
+package handler
 
 import (
 	"log/slog"
@@ -7,21 +7,21 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"healthAgent/internal/llm"
+	"healthAgent/internal/agent"
 )
 
 // Server 持有 HTTP 层依赖，并挂载路由。
 type Server struct {
-	llm    *llm.DeepSeekClient
+	agent  *agent.Agent
 	log    *slog.Logger
 	engine *gin.Engine
 }
 
 // NewServer 构建 HTTP Server 并注册路由与中间件。
-func NewServer(llmClient *llm.DeepSeekClient, log *slog.Logger) *Server {
+func NewServer(ag *agent.Agent, log *slog.Logger) *Server {
 	gin.SetMode(gin.ReleaseMode)
 	s := &Server{
-		llm:    llmClient,
+		agent:  ag,
 		log:    log,
 		engine: gin.New(), // 不用 gin.Default()，用我们自己的中间件（日志/recover）
 	}
@@ -33,7 +33,7 @@ func NewServer(llmClient *llm.DeepSeekClient, log *slog.Logger) *Server {
 // 文本录入足够；语音/文件上传接口后续可单独放宽。
 const maxBodyBytes = 2 << 20
 
-// routes 注册中间件与路由。P0 只挂探活；业务路由在 Phase 1/2 逐步加入。
+// routes 注册中间件与路由。
 func (s *Server) routes() {
 	s.engine.Use(traceMiddleware())
 	s.engine.Use(recoverMiddleware(s.log))

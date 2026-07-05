@@ -1,7 +1,7 @@
 // Package prompt 集中管理提示词模板。
 //
-// 提示词以独立 .md 文件维护（好读、好改、可 diff），通过 go:embed 编译进
-// 二进制，部署时零外部依赖。新增提示词：加一个 .md 文件 + 一个导出函数。
+// 提示词以独立 .txt 文件维护（好读、好改、可 diff），通过 go:embed 编译进
+// 二进制，部署时零外部依赖。新增提示词：加一个 files/*.txt + 一个导出函数。
 package prompt
 
 import (
@@ -9,26 +9,42 @@ import (
 	"strings"
 )
 
-//go:embed system.md
+//go:embed files/system.txt
 var systemTmpl string
 
-// System 返回健康助手的系统人设提示词。
+// System 返回通用健康助手的系统人设。
 func System() string {
 	return strings.TrimSpace(systemTmpl)
 }
 
-//go:embed intent.md
-var intentTmpl string
+//go:embed files/router.txt
+var routerTmpl string
 
-// Intent 返回意图识别提示词，userInput 为用户原始输入。
-func Intent(userInput string) string {
-	return strings.ReplaceAll(intentTmpl, "{user_input}", userInput)
+// Router 返回意图分类提示词，填入用户原始输入。
+func Router(userInput string) string {
+	return strings.ReplaceAll(routerTmpl, "{user_input}", userInput)
 }
 
-//go:embed extract.md
-var extractTmpl string
+//go:embed files/health_extract.txt
+var healthExtractTmpl string
 
-// Extract 返回指标提取提示词，text 为待解析文本（通常是意图识别透传的 extracted_text）。
-func Extract(text string) string {
-	return strings.ReplaceAll(extractTmpl, "{extracted_text}", text)
+// HealthExtract 返回体检指标结构化提取提示词。
+func HealthExtract(text string) string {
+	return strings.ReplaceAll(healthExtractTmpl, "{extracted_text}", text)
+}
+
+//go:embed files/food_record.txt
+var foodRecordTmpl string
+
+// FoodRecord 返回饮食记录结构化提示词。
+func FoodRecord(text string) string {
+	return strings.ReplaceAll(foodRecordTmpl, "{extracted_text}", text)
+}
+
+//go:embed files/diet_advice.txt
+var dietAdviceTmpl string
+
+// DietAdvice 返回饮食建议提示词模板（用户画像占位符待 S6 填充）。
+func DietAdvice() string {
+	return dietAdviceTmpl
 }

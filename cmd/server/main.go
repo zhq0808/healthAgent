@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	apphttp "healthAgent/internal/http"
-
+	"healthAgent/internal/agent"
 	"healthAgent/internal/config"
+	"healthAgent/internal/handler"
 	"healthAgent/internal/llm"
 	"healthAgent/internal/logger"
 )
@@ -44,13 +44,14 @@ func run() error {
 	if cfg.LLM.APIKey == "" {
 		log.Warn("未配置 DEEPSEEK_API_KEY，对话将返回降级兜底回复（请在 .env 中填入）")
 	}
-	llmClient := llm.NewDeepSeekClient(cfg.LLM.APIKey, cfg.LLM.BaseURL, cfg.LLM.Model, time.Duration(cfg.LLM.TimeoutSeconds)*time.Second)
+	client := llm.NewDeepSeekClient(cfg.LLM.APIKey, cfg.LLM.BaseURL, cfg.LLM.Model, time.Duration(cfg.LLM.TimeoutSeconds)*time.Second)
 
-	// 4. 构建 HTTP Server
-	handler := apphttp.NewServer(llmClient, log).Handler()
+	// 4. 构建 Agent（意图识别 + 策略分发）与 HTTP Server
+	ag := agent.New(client, log)
+	srvHandler := handler.NewServer(ag, log).Handler()
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTP.Port,
-		Handler:           handler,
+		Handler:           srvHandler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      60 * time.Second, // LLM 调用可能较慢，给足余量
