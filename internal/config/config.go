@@ -44,7 +44,7 @@ type LogConfig struct {
 // defaultConfig 返回带兜底值的配置，防止 yaml 缺项时出现零值。
 func defaultConfig() *Config {
 	return &Config{
-		HTTP: HTTPConfig{Port: "8080"},
+		HTTP: HTTPConfig{Port: "8091"},
 		DB:   DBConfig{DSN: "./data/health.db"},
 		LLM:  LLMConfig{BaseURL: "https://api.deepseek.com", Model: "deepseek-chat", TimeoutSeconds: 30},
 		Log:  LogConfig{Level: "info", Debug: false},

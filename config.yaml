@@ -1,10 +1,10 @@
 # 健康管理 Agent 配置（非敏感项）。敏感项（API Key）走 .env，不写这里。
 http:
-  port: "8080"
+  port: "8091"
 
 db:
-  # P0 用 SQLite，零依赖起步
-  dsn: "./data/health.db"
+  # MySQL（Docker 启动，见 docker-compose.yml）
+  dsn: "root:root@tcp(127.0.0.1:3308)/health_db?parseTime=true&charset=utf8mb4&loc=Local"
 
 llm:
   base_url: "https://api.deepseek.com"

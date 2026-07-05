@@ -48,13 +48,10 @@ func (s *Server) routes() {
 
 	s.mux.Get("/health", s.healthHandler)
 
-	// P1/P2 业务路由占位（Phase 1 起实现）：
-	// s.mux.Route("/api/v1", func(r chi.Router) {
-	//     r.Post("/intake/text", ...)
-	//     r.Post("/intake/confirm", ...)
-	//     r.Post("/chat", ...)
-	//     r.Post("/meals", ...)
-	// })
+	// 业务路由。竖切片逐步加入。
+	s.mux.Route("/api/v1", func(r chi.Router) {
+		r.Post("/chat", s.chatHandler) // S1 对话
+	})
 }
 
 // Handler 返回底层 http.Handler，供 http.Server 使用。

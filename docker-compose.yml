@@ -1,0 +1,30 @@
+# 健康管理 Agent 本地依赖。
+# 常用命令（在本目录执行）：
+#   docker compose up -d          # 后台启动
+#   docker compose ps             # 查看状态
+#   docker compose logs -f mysql  # 看日志
+#   docker compose down           # 停止并删除容器（数据保留在 volume）
+#   docker compose down -v        # 连数据一起删
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: health-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: health_db
+      TZ: Asia/Shanghai
+    ports:
+      - "3308:3306" # 宿主机 3308，避开 loan 的 3307
+    volumes:
+      - health_mysql_data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  health_mysql_data:
