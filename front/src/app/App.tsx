@@ -4,7 +4,7 @@ import {
   Home, Send, Mic, MicOff, ChevronRight, Flame, Droplets,
   Moon, Activity, Heart, Apple, Coffee, Sun, Star,
   Edit3, Save, TrendingUp, Award, Plus, Check,
-  Volume2, Sparkles, ArrowRight
+  Volume2, Sparkles, ArrowRight, Eye, EyeOff, Lock, Phone, Leaf
 } from "lucide-react";
 import { sendChat } from "./api";
 
@@ -583,8 +583,180 @@ function BottomNav({ active, setTab }: { active: Tab; setTab: (t: Tab) => void }
   );
 }
 
+// ── Login ─────────────────────────────────────────────────────────────────────
+// 说明：当前登录仅前端演示（假 setTimeout）。真鉴权（登录接口 + JWT + user_id）
+// 属 Phase 3，见 docs/plan.md；届时把 handleSubmit 换成真调后端即可，UI 不变。
+type AuthScreen = "login" | "register";
+
+function AuthPage({ onLogin }: { onLogin: () => void }) {
+  const [screen, setScreen] = useState<AuthScreen>("login");
+  const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [showPwd, setShowPwd] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  function handleSubmit() {
+    setError("");
+    if (!phone.trim()) { setError("请输入手机号"); return; }
+    if (!password.trim()) { setError("请输入密码"); return; }
+    if (screen === "register" && password !== confirm) { setError("两次密码不一致"); return; }
+    setLoading(true);
+    setTimeout(() => { setLoading(false); onLogin(); }, 1000);
+  }
+
+  return (
+    <div className="min-h-screen bg-background flex flex-col" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+        .font-display { font-family: 'DM Serif Display', serif; }
+        * { scrollbar-width: none; }
+        *::-webkit-scrollbar { display: none; }
+      `}</style>
+
+      {/* Top illustration */}
+      <div className="bg-primary flex-none flex flex-col items-center justify-end pb-10 pt-16 px-8 relative overflow-hidden" style={{ minHeight: "38vh" }}>
+        {/* Decorative circles */}
+        <div className="absolute top-0 left-0 w-48 h-48 bg-white/5 rounded-full -translate-x-20 -translate-y-20" />
+        <div className="absolute top-8 right-0 w-32 h-32 bg-white/5 rounded-full translate-x-12" />
+        <div className="absolute bottom-0 left-1/2 w-64 h-64 bg-white/5 rounded-full -translate-x-1/2 translate-y-32" />
+
+        {/* Logo mark */}
+        <div className="relative mb-5 w-16 h-16 rounded-2xl bg-white/15 flex items-center justify-center backdrop-blur-sm border border-white/20">
+          <Leaf size={28} className="text-white" />
+        </div>
+        <h1 className="font-display text-3xl text-white text-center leading-tight">健康管理助手</h1>
+        <p className="text-white/70 text-sm text-center mt-2">AI 驱动的个人健康管理平台</p>
+      </div>
+
+      {/* Card */}
+      <div className="flex-1 bg-background rounded-t-3xl -mt-4 px-6 pt-8 pb-10 flex flex-col max-w-lg mx-auto w-full">
+        {/* Tab switcher */}
+        <div className="flex bg-muted rounded-xl p-1 mb-7">
+          {(["login", "register"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => { setScreen(s); setError(""); }}
+              className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${screen === s ? "bg-card shadow-sm text-foreground" : "text-muted-foreground"}`}
+            >
+              {s === "login" ? "登录" : "注册"}
+            </button>
+          ))}
+        </div>
+
+        <div className="space-y-4 flex-1">
+          {/* Phone */}
+          <div>
+            <label className="block text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider">手机号</label>
+            <div className="flex items-center bg-input-background border border-border rounded-xl px-4 py-3 gap-3 focus-within:ring-1 focus-within:ring-ring transition-shadow">
+              <Phone size={16} className="text-muted-foreground flex-shrink-0" />
+              <input
+                type="tel"
+                placeholder="请输入手机号"
+                value={phone}
+                onChange={e => setPhone(e.target.value)}
+                className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground"
+              />
+            </div>
+          </div>
+
+          {/* Password */}
+          <div>
+            <label className="block text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider">密码</label>
+            <div className="flex items-center bg-input-background border border-border rounded-xl px-4 py-3 gap-3 focus-within:ring-1 focus-within:ring-ring transition-shadow">
+              <Lock size={16} className="text-muted-foreground flex-shrink-0" />
+              <input
+                type={showPwd ? "text" : "password"}
+                placeholder="请输入密码"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && handleSubmit()}
+                className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground"
+              />
+              <button onClick={() => setShowPwd(p => !p)} className="text-muted-foreground hover:text-foreground transition-colors">
+                {showPwd ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </div>
+
+          {/* Confirm password (register only) */}
+          {screen === "register" && (
+            <div>
+              <label className="block text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider">确认密码</label>
+              <div className="flex items-center bg-input-background border border-border rounded-xl px-4 py-3 gap-3 focus-within:ring-1 focus-within:ring-ring transition-shadow">
+                <Lock size={16} className="text-muted-foreground flex-shrink-0" />
+                <input
+                  type={showPwd ? "text" : "password"}
+                  placeholder="再次输入密码"
+                  value={confirm}
+                  onChange={e => setConfirm(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleSubmit()}
+                  className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Forgot password */}
+          {screen === "login" && (
+            <div className="text-right">
+              <button className="text-xs text-primary font-medium hover:underline">忘记密码？</button>
+            </div>
+          )}
+
+          {/* Error */}
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-3">
+              {error}
+            </div>
+          )}
+        </div>
+
+        {/* Submit */}
+        <div className="mt-8 space-y-4">
+          <button
+            onClick={handleSubmit}
+            disabled={loading}
+            className="w-full bg-primary text-primary-foreground rounded-xl py-3.5 font-semibold text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-opacity disabled:opacity-70"
+          >
+            {loading ? (
+              <span className="flex gap-1.5">
+                {[0,1,2].map(i => <span key={i} className="w-1.5 h-1.5 rounded-full bg-white/70 animate-bounce" style={{ animationDelay: `${i*0.15}s` }} />)}
+              </span>
+            ) : (screen === "login" ? "登录" : "注册并开始使用")}
+          </button>
+
+          {/* Divider */}
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-border" />
+            <span className="text-xs text-muted-foreground">或</span>
+            <div className="flex-1 h-px bg-border" />
+          </div>
+
+          {/* Guest */}
+          <button
+            onClick={onLogin}
+            className="w-full bg-secondary text-secondary-foreground rounded-xl py-3.5 font-semibold text-sm hover:bg-muted transition-colors"
+          >
+            体验演示版本
+          </button>
+
+          <p className="text-center text-xs text-muted-foreground">
+            登录即代表同意
+            <button className="text-primary font-medium mx-0.5 hover:underline">服务条款</button>
+            与
+            <button className="text-primary font-medium mx-0.5 hover:underline">隐私政策</button>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── App root ──────────────────────────────────────────────────────────────────
 export default function App() {
+  const [authed, setAuthed] = useState(false);
   const [tab, setTab] = useState<Tab | "chat">("chat");
 
   // 聊天状态提升到 App（跨 tab 不卸载的公共祖先），
@@ -596,6 +768,8 @@ export default function App() {
     },
   ]);
   const [isTyping, setIsTyping] = useState(false);
+
+  if (!authed) return <AuthPage onLogin={() => setAuthed(true)} />;
 
   const titles: Record<string, string> = {
     chat: "健康助手",
