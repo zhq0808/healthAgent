@@ -2,9 +2,10 @@ package http
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
+
+	"github.com/gin-gonic/gin"
 
 	"healthAgent/internal/intent"
 )
@@ -31,20 +32,20 @@ type chatReply struct {
 //   - context 超时：从请求 context 派生一个带 deadline 的 context 传给 LLM，
 //     DeepSeek 卡住或客户端断开时能主动取消，不把 handler goroutine 挂死。
 //   - 错误降级：LLM 失败不把 5xx 甩给前端，返回一句友好兜底，真错误进日志。
-func (s *Server) chatHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Server) chatHandler(c *gin.Context) {
 	var req chatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		fail(w, r, http.StatusBadRequest, CodeBadRequest, "请求体解析失败")
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, CodeBadRequest, "请求体解析失败")
 		return
 	}
 	message := strings.TrimSpace(req.Message)
 	if message == "" {
-		fail(w, r, http.StatusBadRequest, CodeBadRequest, "message 不能为空")
+		fail(c, http.StatusBadRequest, CodeBadRequest, "message 不能为空")
 		return
 	}
 
 	// 从请求 context 派生带超时的 context：既继承「客户端断开即取消」，又加一层调用超时上限。
-	ctx, cancel := context.WithTimeout(r.Context(), s.llm.Timeout())
+	ctx, cancel := context.WithTimeout(c.Request.Context(), s.llm.Timeout())
 	defer cancel()
 
 	reply, err := s.llm.Chat(ctx, message)
@@ -52,9 +53,9 @@ func (s *Server) chatHandler(w http.ResponseWriter, r *http.Request) {
 		// 业务层降级：给用户一句友好兜底，真错误只进日志，避免把内部细节暴露给前端。
 		s.log.Warn("调用大模型失败，降级返回兜底回复",
 			"error", err,
-			"trace_id", TraceIDFromContext(r.Context()),
+			"trace_id", TraceIDFromContext(c.Request.Context()),
 		)
-		ok(w, r, chatReply{Reply: "抱歉，我现在有点忙，稍后再问我一次好吗？"})
+		ok(c, chatReply{Reply: "抱歉，我现在有点忙，稍后再问我一次好吗？"})
 		return
 	}
 
@@ -63,5 +64,5 @@ func (s *Server) chatHandler(w http.ResponseWriter, r *http.Request) {
 	if cardType, matched := intent.Resolve(message); matched {
 		resp.Card = &cardPayload{Type: cardType}
 	}
-	ok(w, r, resp)
+	ok(c, resp)
 }

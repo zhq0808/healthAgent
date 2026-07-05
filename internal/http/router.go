@@ -5,27 +5,25 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/gin-gonic/gin"
 
 	"healthAgent/internal/llm"
-	"healthAgent/internal/store"
 )
 
 // Server 持有 HTTP 层依赖，并挂载路由。
 type Server struct {
-	store *store.Store
-	llm   *llm.Client
-	log   *slog.Logger
-	mux   *chi.Mux
+	llm    *llm.Client
+	log    *slog.Logger
+	engine *gin.Engine
 }
 
 // NewServer 构建 HTTP Server 并注册路由与中间件。
-func NewServer(st *store.Store, llmClient *llm.Client, log *slog.Logger) *Server {
+func NewServer(llmClient *llm.Client, log *slog.Logger) *Server {
+	gin.SetMode(gin.ReleaseMode)
 	s := &Server{
-		store: st,
-		llm:   llmClient,
-		log:   log,
-		mux:   chi.NewRouter(),
+		llm:    llmClient,
+		log:    log,
+		engine: gin.New(), // 不用 gin.Default()，用我们自己的中间件（日志/recover）
 	}
 	s.routes()
 	return s
@@ -37,27 +35,28 @@ const maxBodyBytes = 2 << 20
 
 // routes 注册中间件与路由。P0 只挂探活；业务路由在 Phase 1/2 逐步加入。
 func (s *Server) routes() {
-	s.mux.Use(traceMiddleware)
-	s.mux.Use(recoverMiddleware(s.log))
-	s.mux.Use(accessLogMiddleware(s.log))
-	s.mux.Use(bodyLimitMiddleware(maxBodyBytes))
+	s.engine.Use(traceMiddleware())
+	s.engine.Use(recoverMiddleware(s.log))
+	s.engine.Use(accessLogMiddleware(s.log))
+	s.engine.Use(bodyLimitMiddleware(maxBodyBytes))
 
-	s.mux.NotFound(func(w http.ResponseWriter, r *http.Request) {
-		fail(w, r, http.StatusNotFound, CodeNotFound, "接口不存在")
+	s.engine.NoRoute(func(c *gin.Context) {
+		fail(c, http.StatusNotFound, CodeNotFound, "接口不存在")
 	})
-	s.mux.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
-		fail(w, r, http.StatusMethodNotAllowed, CodeMethodNA, "方法不允许")
+	s.engine.NoMethod(func(c *gin.Context) {
+		fail(c, http.StatusMethodNotAllowed, CodeMethodNA, "方法不允许")
 	})
 
-	s.mux.Get("/health", s.healthHandler)
+	s.engine.GET("/health", s.healthHandler)
 
 	// 业务路由。竖切片逐步加入。
-	s.mux.Route("/api/v1", func(r chi.Router) {
-		r.Post("/chat", s.chatHandler) // S1 对话
-	})
+	v1 := s.engine.Group("/api/v1")
+	{
+		v1.POST("/chat", s.chatHandler) // S1 对话
+	}
 }
 
 // Handler 返回底层 http.Handler，供 http.Server 使用。
 func (s *Server) Handler() http.Handler {
-	return s.mux
+	return s.engine
 }

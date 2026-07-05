@@ -12,7 +12,6 @@ import (
 // Config 是应用的全部配置。敏感项（LLM API Key）只从环境变量读取，不落 yaml。
 type Config struct {
 	HTTP HTTPConfig `yaml:"http"`
-	DB   DBConfig   `yaml:"db"`
 	LLM  LLMConfig  `yaml:"llm"`
 	Log  LogConfig  `yaml:"log"`
 }
@@ -20,11 +19,6 @@ type Config struct {
 // HTTPConfig 是 HTTP 服务配置。
 type HTTPConfig struct {
 	Port string `yaml:"port"`
-}
-
-// DBConfig 是数据库配置。P0 使用 SQLite。
-type DBConfig struct {
-	DSN string `yaml:"dsn"`
 }
 
 // LLMConfig 是大模型配置。APIKey 只从环境变量注入。
@@ -45,8 +39,7 @@ type LogConfig struct {
 func defaultConfig() *Config {
 	return &Config{
 		HTTP: HTTPConfig{Port: "8091"},
-		DB:   DBConfig{DSN: "./data/health.db"},
-		LLM:  LLMConfig{BaseURL: "https://api.deepseek.com", Model: "deepseek-chat", TimeoutSeconds: 30},
+		LLM:  LLMConfig{BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", TimeoutSeconds: 30},
 		Log:  LogConfig{Level: "info", Debug: false},
 	}
 }
@@ -78,9 +71,6 @@ func (c *Config) overrideFromEnv() {
 	if v := os.Getenv("HTTP_PORT"); v != "" {
 		c.HTTP.Port = v
 	}
-	if v := os.Getenv("DB_DSN"); v != "" {
-		c.DB.DSN = v
-	}
 	if v := os.Getenv("DEEPSEEK_API_KEY"); v != "" {
 		c.LLM.APIKey = v
 	}
@@ -104,9 +94,6 @@ func (c *Config) overrideFromEnv() {
 func (c *Config) validate() error {
 	if c.HTTP.Port == "" {
 		return fmt.Errorf("http.port 不能为空")
-	}
-	if c.DB.DSN == "" {
-		return fmt.Errorf("db.dsn 不能为空")
 	}
 	return nil
 }

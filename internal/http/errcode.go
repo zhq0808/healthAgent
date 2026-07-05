@@ -5,13 +5,11 @@ package http
 const (
 	CodeOK = 0
 
-	CodeBadRequest      = 40000 // 通用参数错误
-	CodeNotFound        = 40400 // 资源不存在
-	CodeMethodNA        = 40500 // 方法不允许
-	CodePayloadTooLarge = 41300 // 请求体过大
+	CodeBadRequest = 40000 // 通用参数错误
+	CodeNotFound   = 40400 // 资源不存在
+	CodeMethodNA   = 40500 // 方法不允许
 
-	CodeInternal      = 50000 // 内部错误
-	CodeDBUnavailable = 50300 // 依赖（DB）不可用
+	CodeInternal = 50000 // 内部错误
 
 	// Phase 1 录入相关（占位，实现时启用）：
 	// CodeDraftNotFound    = 40401

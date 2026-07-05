@@ -1,8 +1,9 @@
 package http
 
 import (
-	"encoding/json"
 	"net/http"
+
+	"github.com/gin-gonic/gin"
 )
 
 // Response 是全站统一响应结构。
@@ -14,23 +15,21 @@ type Response struct {
 }
 
 // writeJSON 写入统一格式的 JSON 响应，并携带 trace_id。
-func writeJSON(w http.ResponseWriter, r *http.Request, httpStatus, code int, message string, data any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(httpStatus)
-	_ = json.NewEncoder(w).Encode(Response{
+func writeJSON(c *gin.Context, httpStatus, code int, message string, data any) {
+	c.JSON(httpStatus, Response{
 		Code:    code,
 		Message: message,
 		Data:    data,
-		TraceID: TraceIDFromContext(r.Context()),
+		TraceID: TraceIDFromContext(c.Request.Context()),
 	})
 }
 
 // ok 返回成功响应。
-func ok(w http.ResponseWriter, r *http.Request, data any) {
-	writeJSON(w, r, http.StatusOK, 0, "ok", data)
+func ok(c *gin.Context, data any) {
+	writeJSON(c, http.StatusOK, CodeOK, "ok", data)
 }
 
 // fail 返回错误响应。
-func fail(w http.ResponseWriter, r *http.Request, httpStatus, code int, message string) {
-	writeJSON(w, r, httpStatus, code, message, nil)
+func fail(c *gin.Context, httpStatus, code int, message string) {
+	writeJSON(c, httpStatus, code, message, nil)
 }

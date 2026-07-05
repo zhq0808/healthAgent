@@ -2,10 +2,6 @@
 http:
   port: "8091"
 
-db:
-  # MySQL（Docker 启动，见 docker-compose.yml）
-  dsn: "root:root@tcp(127.0.0.1:3308)/health_db?parseTime=true&charset=utf8mb4&loc=Local"
-
 llm:
   base_url: "https://api.deepseek.com"
   model: "deepseek-chat"

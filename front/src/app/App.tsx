@@ -4,7 +4,7 @@ import {
   Home, Send, Mic, MicOff, ChevronRight, Flame, Droplets,
   Moon, Activity, Heart, Apple, Coffee, Sun, Star,
   Edit3, Save, TrendingUp, Award, Plus, Check,
-  Volume2, Sparkles, ArrowRight, Eye, EyeOff, Lock, Phone, Leaf
+  Volume2, Sparkles, ArrowRight, Eye, EyeOff, Lock, Leaf
 } from "lucide-react";
 import { sendChat } from "./api";
 
@@ -590,7 +590,7 @@ type AuthScreen = "login" | "register";
 
 function AuthPage({ onLogin }: { onLogin: () => void }) {
   const [screen, setScreen] = useState<AuthScreen>("login");
-  const [phone, setPhone] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [showPwd, setShowPwd] = useState(false);
@@ -599,7 +599,7 @@ function AuthPage({ onLogin }: { onLogin: () => void }) {
 
   function handleSubmit() {
     setError("");
-    if (!phone.trim()) { setError("请输入手机号"); return; }
+    if (!username.trim()) { setError("请输入用户名"); return; }
     if (!password.trim()) { setError("请输入密码"); return; }
     if (screen === "register" && password !== confirm) { setError("两次密码不一致"); return; }
     setLoading(true);
@@ -646,16 +646,16 @@ function AuthPage({ onLogin }: { onLogin: () => void }) {
         </div>
 
         <div className="space-y-4 flex-1">
-          {/* Phone */}
+          {/* Username */}
           <div>
-            <label className="block text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider">手机号</label>
+            <label className="block text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider">用户名</label>
             <div className="flex items-center bg-input-background border border-border rounded-xl px-4 py-3 gap-3 focus-within:ring-1 focus-within:ring-ring transition-shadow">
-              <Phone size={16} className="text-muted-foreground flex-shrink-0" />
+              <User size={16} className="text-muted-foreground flex-shrink-0" />
               <input
-                type="tel"
-                placeholder="请输入手机号"
-                value={phone}
-                onChange={e => setPhone(e.target.value)}
+                type="text"
+                placeholder="请输入用户名"
+                value={username}
+                onChange={e => setUsername(e.target.value)}
                 className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground"
               />
             </div>
