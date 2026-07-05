@@ -49,6 +49,9 @@ Thumbs.db
 *.log
 logs/
 
+# ---- 内部文档（不入库）----
+docs/
+
 # ---- 前端 / Node（front/）----
 node_modules/
 front/dist/

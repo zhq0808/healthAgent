@@ -8,17 +8,28 @@ interface ApiResponse<T> {
   trace_id?: string;
 }
 
-// sendChat 发送一条对话消息，返回 AI 回复文本。
+// 后端返回的结构化卡片。前端按 type 渲染对应卡片（数据暂由前端 mock，属 S6+）。
+export interface ChatCard {
+  type: "meal" | "checkin" | "stats";
+}
+
+// sendChat 的返回：AI 文本回复 + 可选卡片（由后端意图识别决定）。
+export interface ChatResult {
+  reply: string;
+  card: ChatCard | null;
+}
+
+// sendChat 发送一条对话消息，返回 AI 回复文本与可选卡片。
 // 失败时抛错，交给调用方决定如何在 UI 上兜底。
-export async function sendChat(message: string): Promise<string> {
+export async function sendChat(message: string): Promise<ChatResult> {
   const res = await fetch("/api/v1/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message }),
   });
-  const body = (await res.json()) as ApiResponse<{ reply: string }>;
+  const body = (await res.json()) as ApiResponse<{ reply: string; card?: ChatCard }>;
   if (!res.ok || body.code !== 0) {
     throw new Error(body.message || `HTTP ${res.status}`);
   }
-  return body.data?.reply ?? "";
+  return { reply: body.data?.reply ?? "", card: body.data?.card ?? null };
 }

@@ -194,13 +194,11 @@ function ChatCore({ goTo, messages, setMessages, isTyping, setIsTyping }: {
     setInput("");
     setIsTyping(true);
 
-    // 卡片仍走本地意图匹配（膳食/打卡/数据卡片是 S6+ 才接后端）；
-    // 文本回复改为真调后端 /api/v1/chat。
-    const { card } = resolveIntent(text);
+    // 文本回复与卡片均由后端 /api/v1/chat 返回：前端不再做意图判断。
     sendChat(text.trim())
-      .then(reply => {
+      .then(({ reply, card }) => {
         const aiMsg: Message = { id: Date.now() + 1, role: "ai", text: reply, time: nowStr() };
-        if (card) aiMsg.card = card;
+        if (card) aiMsg.card = { type: card.type, data: null };
         setMessages(p => [...p, aiMsg]);
       })
       .catch(() => {

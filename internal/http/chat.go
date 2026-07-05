@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"healthAgent/internal/intent"
 )
 
 // chatRequest 是 POST /api/v1/chat 的请求体。
@@ -12,9 +14,15 @@ type chatRequest struct {
 	Message string `json:"message"`
 }
 
-// chatReply 是对话回复体。S1-a 先返回写死内容；S1-b 接入 DeepSeek 后返回真回复。
+// cardPayload 是回复可选附带的结构化卡片。前端按 Type 渲染对应卡片（数据暂由前端 mock，属 S6+）。
+type cardPayload struct {
+	Type string `json:"type"`
+}
+
+// chatReply 是对话回复体。Reply 为文本回复；Card 可选，由后端按意图决定是否附带。
 type chatReply struct {
-	Reply string `json:"reply"`
+	Reply string       `json:"reply"`
+	Card  *cardPayload `json:"card,omitempty"`
 }
 
 // chatHandler 处理对话请求：校验入参 → 调 DeepSeek → 返回真回复。
@@ -50,5 +58,10 @@ func (s *Server) chatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ok(w, r, chatReply{Reply: reply})
+	// 意图识别在后端完成：命中则附带结构化卡片，前端只负责渲染。
+	resp := chatReply{Reply: reply}
+	if cardType, matched := intent.Resolve(message); matched {
+		resp.Card = &cardPayload{Type: cardType}
+	}
+	ok(w, r, resp)
 }
