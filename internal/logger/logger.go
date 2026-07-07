@@ -1,23 +1,48 @@
 // Package logger 提供结构化日志。
-//
-// 合规红线：默认不打印体检原文、健康数值、完整 prompt 等敏感信息。
-// 只有在 Debug=true（仅限本地）时才允许通过 debug 级别输出敏感原文。
 package logger
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"strings"
 )
 
-// New 创建一个 JSON 结构化 logger。level 支持 debug/info/warn/error。
+// TraceIDKey 是全局唯一的 Context Key，供中间件和日志包共用
+type contextKey string
+
+const TraceIDKey contextKey = "trace_id"
+
+// ContextHandler 包装原生的 slog.Handler，自动提取 Context 中的元数据
+type ContextHandler struct {
+	slog.Handler
+}
+
+// Handle 拦截每一条日志记录，自动注入 trace_id
+func (h *ContextHandler) Handle(ctx context.Context, r slog.Record) error {
+	if traceID, ok := ctx.Value(TraceIDKey).(string); ok {
+		// 将 trace_id 追加到日志属性中
+		r.AddAttrs(slog.String("trace_id", traceID))
+	}
+	return h.Handler.Handle(ctx, r)
+}
+
+// New 创建一个注入了 ContextHandler 的结构化 logger
 func New(level string, debug bool) *slog.Logger {
 	lv := parseLevel(level)
-	// debug 标志会强制放开到 debug 级别，用于本地排查。
 	if debug {
 		lv = slog.LevelDebug
 	}
-	h := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lv})
+
+	// 1. 创建基础的 JSON Handler，并保留源码位置输出
+	baseHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level:     lv,
+		AddSource: true,
+	})
+
+	// 2. 用自定义的 ContextHandler 包装它
+	h := &ContextHandler{Handler: baseHandler}
+
 	return slog.New(h)
 }
 

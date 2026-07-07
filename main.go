@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"healthAgent/internal/agent"
 	"healthAgent/internal/config"
 	"healthAgent/internal/handler"
 	"healthAgent/internal/llm"
@@ -41,20 +40,23 @@ func run() error {
 	slog.SetDefault(log)
 
 	// 3. 构建 LLM 客户端（DeepSeek）。API Key 缺省时不阻断启动，调用时走降级兜底。
-	if cfg.LLM.APIKey == "" {
+	if cfg.DeepSeek.APIKey == "" {
 		log.Warn("未配置 DEEPSEEK_API_KEY，对话将返回降级兜底回复（请在 .env 中填入）")
 	}
-	client := llm.NewDeepSeekClient(cfg.LLM.APIKey, cfg.LLM.BaseURL, cfg.LLM.Model, time.Duration(cfg.LLM.TimeoutSeconds)*time.Second)
+	client := llm.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL, cfg.DeepSeek.Model, time.Duration(cfg.DeepSeek.TimeoutSeconds)*time.Second)
 
-	// 4. 构建 Agent（意图识别 + 策略分发）与 HTTP Server
-	ag := agent.New(client, log)
-	srvHandler := handler.NewServer(ag, log).Handler()
+	// writeTimeout 是单个请求最长处理时间（LLM 调用可能较慢，给足余量）。
+	// 优雅关闭的等待时间必须 >= 它，否则在途慢请求会被提前掐断，见下方 shutdownGrace。
+	const writeTimeout = 60 * time.Second
+
+	// 4. 构建 HTTP Server（当前只做基础对话，直接依赖 LLM 客户端）
+	srvHandler := handler.NewServer(client, log).Handler()
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTP.Port,
 		Handler:           srvHandler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      60 * time.Second, // LLM 调用可能较慢，给足余量
+		WriteTimeout:      writeTimeout,
 		IdleTimeout:       60 * time.Second,
 	}
 
@@ -78,8 +80,11 @@ func run() error {
 		log.Info("收到退出信号，开始优雅关闭", "signal", sig.String())
 	}
 
-	// 7. 真优雅关闭：停止接收新请求，等待在途请求处理完毕，最多等 10s
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// 7. 真优雅关闭：停止接收新请求，等待在途请求处理完毕。
+	// 等待上限必须 >= writeTimeout，再加几秒缓冲，确保最慢的在途 LLM 请求也能跑完，
+	// 而不是刚等到一半就被 cancel 掐断连接（那样对慢请求来说优雅关闭形同虚设）。
+	shutdownGrace := writeTimeout + 5*time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		return err

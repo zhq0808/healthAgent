@@ -2,10 +2,10 @@
 http:
   port: "8091"
 
-llm:
+deepseek:
   base_url: "https://api.deepseek.com"
   model: "deepseek-chat"
-  timeout_seconds: 30
+  timeout: 30
 
 log:
   level: "info"   # debug | info | warn | error

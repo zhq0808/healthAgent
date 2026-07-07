@@ -1,7 +1,7 @@
 
-  # 健康管理Agent UI设计
+  # AI Health Assistant App
 
-  This is a code bundle for 健康管理Agent UI设计. The original project is available at https://www.figma.com/design/l0mVkFSQQyIrrTnheueeO4/%E5%81%A5%E5%BA%B7%E7%AE%A1%E7%90%86Agent-UI%E8%AE%BE%E8%AE%A1.
+  This is a code bundle for AI Health Assistant App. The original project is available at https://www.figma.com/design/lqCD7xbvA3GaQ6XingtJgq/AI-Health-Assistant-App.
 
   ## Running the code
 

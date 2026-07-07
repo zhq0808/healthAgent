@@ -2,98 +2,58 @@ package config
 
 import (
 	"fmt"
-	"os"
-	"strconv"
 
+	"github.com/ilyakaznacheev/cleanenv"
 	"github.com/joho/godotenv"
-	"gopkg.in/yaml.v3"
 )
 
-// Config 是应用的全部配置。敏感项（LLM API Key）只从环境变量读取，不落 yaml。
+// Config 是应用的全部配置
 type Config struct {
-	HTTP HTTPConfig `yaml:"http"`
-	LLM  LLMConfig  `yaml:"llm"`
-	Log  LogConfig  `yaml:"log"`
+	HTTP     HTTPConfig   `yaml:"http"     env-prefix:"HTTP_"`
+	DeepSeek LLMConfig    `yaml:"deepseek" env-prefix:"DEEPSEEK_"`
+	OpenAI   OpenAIConfig `yaml:"openai"   env-prefix:"OPENAI_"` // 新增 OpenAI 配置入口
+	Log      LogConfig    `yaml:"log"      env-prefix:"LOG_"`
 }
 
-// HTTPConfig 是 HTTP 服务配置。
+// HTTPConfig 保持不变
 type HTTPConfig struct {
-	Port string `yaml:"port"`
+	Port string `yaml:"port" env:"PORT" env-default:"8091"`
 }
 
-// LLMConfig 是大模型配置。APIKey 只从环境变量注入。
+// LLMConfig 目前专门给 DeepSeek 用
 type LLMConfig struct {
-	APIKey         string `yaml:"-"`
-	BaseURL        string `yaml:"base_url"`
-	Model          string `yaml:"model"`
-	TimeoutSeconds int    `yaml:"timeout_seconds"`
+	APIKey         string `yaml:"-"        env:"API_KEY"`
+	BaseURL        string `yaml:"base_url" env:"BASE_URL" env-default:"https://api.deepseek.com"`
+	Model          string `yaml:"model"    env:"MODEL"    env-default:"deepseek-chat"`
+	TimeoutSeconds int    `yaml:"timeout"  env:"TIMEOUT"  env-default:"30"`
 }
 
-// LogConfig 是日志配置。Debug 为 true 时才允许打印敏感原文，仅限本地。
+// OpenAIConfig 是你后续新增的 OpenAI 配置
+type OpenAIConfig struct {
+	APIKey         string `yaml:"-"        env:"API_KEY"` // 实际读取环境变量 OPENAI_API_KEY
+	BaseURL        string `yaml:"base_url" env:"BASE_URL" env-default:"https://api.openai.com/v1"`
+	Model          string `yaml:"model"    env:"MODEL"    env-default:"gpt-4-turbo"`
+	TimeoutSeconds int    `yaml:"timeout"  env:"TIMEOUT"  env-default:"60"` // OpenAI 可能更慢，单独设超时
+}
+
 type LogConfig struct {
-	Level string `yaml:"level"`
-	Debug bool   `yaml:"debug"`
+	Level string `yaml:"level" env:"LEVEL" env-default:"info"`
+	Debug bool   `yaml:"debug" env:"DEBUG" env-default:"false"`
 }
 
-// defaultConfig 返回带兜底值的配置，防止 yaml 缺项时出现零值。
-func defaultConfig() *Config {
-	return &Config{
-		HTTP: HTTPConfig{Port: "8091"},
-		LLM:  LLMConfig{BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", TimeoutSeconds: 30},
-		Log:  LogConfig{Level: "info", Debug: false},
-	}
-}
-
-// Load 加载配置：先读 yaml 文件，再用环境变量覆盖敏感/可覆盖项。
-// yaml 文件不存在时使用默认值，不视为错误。
+// Load 加载配置：cleanenv 按扩展名解析 yaml 文件，并用环境变量覆盖。
+// 注意：cleanenv 只读“进程环境变量”，不会解析 .env 文件；
+// 所以必须先用 godotenv 把 .env 灌进环境，API Key 等敏感项才读得到。
 func Load(path string) (*Config, error) {
-	// 尽力加载 .env，不存在也无妨。
+	// 尽力加载 .env，不存在也无妨（线上用真实环境变量注入）。
 	_ = godotenv.Load()
 
-	cfg := defaultConfig()
+	var cfg Config
 
-	if data, err := os.ReadFile(path); err == nil {
-		if err := yaml.Unmarshal(data, cfg); err != nil {
-			return nil, fmt.Errorf("解析配置文件 %s 失败: %w", path, err)
-		}
+	// cleanenv 会利用反射，自动把新增的 OpenAIConfig 解析并填充好
+	if err := cleanenv.ReadConfig(path, &cfg); err != nil {
+		return nil, fmt.Errorf("配置加载失败: %w", err)
 	}
 
-	cfg.overrideFromEnv()
-
-	if err := cfg.validate(); err != nil {
-		return nil, err
-	}
-	return cfg, nil
-}
-
-// overrideFromEnv 用环境变量覆盖配置。敏感项（API Key）仅此一处来源。
-func (c *Config) overrideFromEnv() {
-	if v := os.Getenv("HTTP_PORT"); v != "" {
-		c.HTTP.Port = v
-	}
-	if v := os.Getenv("DEEPSEEK_API_KEY"); v != "" {
-		c.LLM.APIKey = v
-	}
-	if v := os.Getenv("DEEPSEEK_BASE_URL"); v != "" {
-		c.LLM.BaseURL = v
-	}
-	if v := os.Getenv("DEEPSEEK_MODEL"); v != "" {
-		c.LLM.Model = v
-	}
-	if v := os.Getenv("LOG_LEVEL"); v != "" {
-		c.Log.Level = v
-	}
-	if v := os.Getenv("LOG_DEBUG"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			c.Log.Debug = b
-		}
-	}
-}
-
-// validate 校验必填项。P0 阶段 LLM Key 允许缺省（骨架可先启动），仅在使用时才要求。
-func (c *Config) validate() error {
-	if c.HTTP.Port == "" {
-		return fmt.Errorf("http.port 不能为空")
-	}
-	return nil
+	return &cfg, nil
 }

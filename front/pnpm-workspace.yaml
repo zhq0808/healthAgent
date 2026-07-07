@@ -3,6 +3,7 @@ packages:
 supportedArchitectures:
   os:
     - linux
+    - win32
   cpu:
     - x64
     - arm64
@@ -10,3 +11,6 @@ supportedArchitectures:
     - glibc
 # Refuse packages published < 7 days ago, matching the root pnpm-workspace.yaml.
 minimumReleaseAge: 10080
+allowBuilds:
+  '@tailwindcss/oxide': true
+  esbuild: true

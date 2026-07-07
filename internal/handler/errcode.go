@@ -9,4 +9,5 @@ const (
 	CodeMethodNA   = 40500 // 方法不允许
 
 	CodeInternal = 50000 // 内部错误
+	CodeUpstream = 50200 // 上游（大模型）不可用
 )

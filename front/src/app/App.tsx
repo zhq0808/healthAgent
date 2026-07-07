@@ -1,901 +1,389 @@
 import { useState, useRef, useEffect } from "react";
-import {
-  User, MessageCircle, UtensilsCrossed, CheckSquare,
-  Home, Send, Mic, MicOff, ChevronRight, Flame, Droplets,
-  Moon, Activity, Heart, Apple, Coffee, Sun, Star,
-  Edit3, Save, TrendingUp, Award, Plus, Check,
-  Volume2, Sparkles, ArrowRight, Eye, EyeOff, Lock, Leaf
-} from "lucide-react";
-import { sendChat } from "./api";
-
-type Tab = "home" | "profile" | "meals" | "checkin";
+import { AnimatePresence } from "motion/react";
+import { StatusTags, StatusTagDef } from "./components/StatusTags";
+import { MealSuggestionCard } from "./components/MealSuggestionCard";
+import { ActionCard } from "./components/ActionCard";
+import { WarningCard } from "./components/WarningCard";
+import { ConfirmationCard } from "./components/ConfirmationCard";
+import { MorningGreetingCard } from "./components/MorningGreetingCard";
+import { InputDock } from "./components/InputDock";
+import { UserMessage } from "./components/UserMessage";
+import { AIMessage } from "./components/AIMessage";
+import { MealCard } from "./components/MealCard";
+import { sendChatStream, ChatMessage } from "./api/chat";
 
 interface Message {
-  id: number;
-  role: "user" | "ai";
-  text?: string;
-  card?: CardPayload;
-  time: string;
+  id: string;
+  type:
+    | "user"
+    | "ai"
+    | "meal-card"
+    | "meal-suggestion"
+    | "action-card"
+    | "warning"
+    | "confirmation"
+    | "morning-greeting";
+  content: any;
 }
 
-interface CardPayload {
-  type: "meal" | "checkin" | "stats";
-  data: unknown;
+interface ActionItem {
+  id: string;
+  text: string;
+  completed: boolean;
 }
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-function nowStr() {
-  return new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-}
+const initialActions: ActionItem[] = [
+  { id: "1", text: "餐前测血糖", completed: true },
+  { id: "2", text: "饮用 500ml 温水", completed: false },
+  { id: "3", text: "完成 20 分钟散步", completed: false },
+];
 
-// Intent matching → card or text
-function resolveIntent(text: string): { reply: string; card?: CardPayload } {
-  const t = text.toLowerCase();
-  if (t.includes("吃") || t.includes("饭") || t.includes("饮食") || t.includes("热量") || t.includes("营养")) {
-    return {
-      reply: "根据你今天的活动量，我为你推荐以下膳食计划 🍽️",
-      card: { type: "meal", data: null },
-    };
-  }
-  if (t.includes("打卡") || t.includes("任务") || t.includes("完成") || t.includes("习惯")) {
-    return {
-      reply: "这是你今天的健康打卡进度，点击可以直接记录 ✅",
-      card: { type: "checkin", data: null },
-    };
-  }
-  if (t.includes("数据") || t.includes("步数") || t.includes("睡眠") || t.includes("今天") || t.includes("状态")) {
-    return {
-      reply: "来看看你今天的身体数据吧 📊",
-      card: { type: "stats", data: null },
-    };
-  }
-  const generic = [
-    "根据你的档案，建议今天保持 1800 大卡摄入，蛋白质 ≥ 60g，多喝水！",
-    "你今天的步数还不错！再走 2000 步就能完成今日目标，加油 💪",
-    "睡眠对代谢影响很大。建议你今晚 22:30 前入睡，保证 7-8 小时。",
-    "你已经连续打卡 7 天了！保持这个节奏，下周会看到明显变化的 🌱",
-  ];
-  return { reply: generic[Math.floor(Math.random() * generic.length)] };
-}
+const INITIAL_TAGS: StatusTagDef[] = [
+  {
+    id: "blood-sugar",
+    emoji: "🩸",
+    label: "关注控糖",
+    color: "bg-[#EEF2E8] text-[#5A7C5C]",
+    state: "active",
+    sparklineData: [
+      { v: 5.3 },
+      { v: 5.5 },
+      { v: 5.4 },
+      { v: 5.2 },
+      { v: 5.5 },
+      { v: 5.4 },
+      { v: 5.4 },
+    ],
+    summary: "近期血糖平稳，7 天均值 5.4",
+  },
+  {
+    id: "energy",
+    emoji: "✨",
+    label: "满血复活",
+    color: "bg-[#FFF5E6] text-[#A67C52]",
+    state: "active",
+    sparklineData: [
+      { v: 4 },
+      { v: 5 },
+      { v: 6 },
+      { v: 6 },
+      { v: 7 },
+      { v: 8 },
+      { v: 8 },
+    ],
+    summary: "精力状态回升，最近保持得不错，继续加油！",
+  },
+  {
+    id: "period",
+    emoji: "🩸",
+    label: "姨妈期",
+    color: "bg-[#FBEAEC] text-[#B5687A]",
+    state: "active",
+    sparklineData: [
+      { v: 3 },
+      { v: 4 },
+      { v: 5 },
+      { v: 5 },
+      { v: 4 },
+      { v: 3 },
+      { v: 3 },
+    ],
+    summary: "经期第 2 天，注意保暖、多喝温水，适度休息。",
+  },
+];
 
-// ── Inline cards ──────────────────────────────────────────────────────────────
-function MealCard() {
-  const meals = [
-    { time: "早餐", name: "燕麦粥 + 水煮蛋 + 牛奶", cal: 380, emoji: "🥣", tags: ["高蛋白", "低脂"] },
-    { time: "午餐", name: "清蒸鲈鱼 + 糙米饭 + 西兰花", cal: 560, emoji: "🐟", tags: ["均衡"] },
-    { time: "加餐", name: "希腊酸奶 + 蓝莓", cal: 140, emoji: "🫐", tags: ["益生菌"] },
-    { time: "晚餐", name: "番茄牛肉汤 + 全麦面包", cal: 480, emoji: "🍲", tags: ["饱腹感"] },
-  ];
-  const [logged, setLogged] = useState<Set<number>>(new Set());
-  return (
-    <div className="bg-card border border-border rounded-2xl overflow-hidden w-full mt-2">
-      <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">今日膳食推荐</span>
-        <span className="text-xs text-orange-500 font-semibold">共 {meals.reduce((s, m) => s + m.cal, 0)} kcal</span>
-      </div>
-      <div className="divide-y divide-border">
-        {meals.map((m, i) => (
-          <button
-            key={i}
-            onClick={() => setLogged(prev => { const s = new Set(prev); s.has(i) ? s.delete(i) : s.add(i); return s; })}
-            className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${logged.has(i) ? "bg-emerald-50/60" : "hover:bg-secondary"}`}
-          >
-            <span className="text-xl">{m.emoji}</span>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5 mb-0.5">
-                <span className="text-[10px] font-semibold text-muted-foreground uppercase">{m.time}</span>
-                <span className="text-[10px] text-orange-400 font-medium">{m.cal} kcal</span>
-              </div>
-              <p className="text-xs font-medium truncate">{m.name}</p>
-            </div>
-            <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${logged.has(i) ? "bg-primary text-primary-foreground" : "border-2 border-border"}`}>
-              {logged.has(i) && <Check size={10} />}
-            </div>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function CheckInCard() {
-  const items = [
-    { label: "完成步数目标", icon: "🏃", done: false },
-    { label: "喝够 8 杯水", icon: "💧", done: false },
-    { label: "7h 以上睡眠", icon: "🌙", done: true },
-    { label: "吃早饭", icon: "☀️", done: true },
-    { label: "完成今日锻炼", icon: "🔥", done: false },
-    { label: "晒 15 分钟太阳", icon: "🌿", done: false },
-  ];
-  const [done, setDone] = useState<Set<number>>(new Set(items.map((it, i) => it.done ? i : -1).filter(i => i >= 0)));
-  const pct = Math.round((done.size / items.length) * 100);
-  return (
-    <div className="bg-card border border-border rounded-2xl overflow-hidden w-full mt-2">
-      <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">今日打卡</span>
-        <span className="text-xs text-primary font-semibold">{done.size}/{items.length} · {pct}%</span>
-      </div>
-      <div className="px-4 pt-3 pb-1">
-        <div className="h-1.5 bg-muted rounded-full overflow-hidden mb-3">
-          <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
-        </div>
-        <div className="grid grid-cols-2 gap-1.5 pb-3">
-          {items.map((it, i) => (
-            <button
-              key={i}
-              onClick={() => setDone(prev => { const s = new Set(prev); s.has(i) ? s.delete(i) : s.add(i); return s; })}
-              className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-left transition-colors ${done.has(i) ? "bg-emerald-50 border border-emerald-200" : "bg-secondary border border-transparent hover:border-border"}`}
-            >
-              <span className="text-base">{it.icon}</span>
-              <span className={`text-[11px] font-medium leading-tight ${done.has(i) ? "text-emerald-700 line-through" : "text-foreground"}`}>{it.label}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function StatsCard() {
-  const stats = [
-    { label: "步数", value: "6,240", target: "10k", pct: 62, color: "#2E5E3E" },
-    { label: "睡眠", value: "7.2h", target: "8h", pct: 90, color: "#7B5EA7" },
-    { label: "饮水", value: "1.4L", target: "2L", pct: 70, color: "#3B82F6" },
-    { label: "卡路里", value: "1,280", target: "1800", pct: 71, color: "#F97316" },
-  ];
-  return (
-    <div className="bg-card border border-border rounded-2xl overflow-hidden w-full mt-2">
-      <div className="px-4 py-3 border-b border-border">
-        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">今日数据总览</span>
-      </div>
-      <div className="grid grid-cols-2 gap-px bg-border">
-        {stats.map((s) => (
-          <div key={s.label} className="bg-card px-4 py-3">
-            <p className="text-[10px] text-muted-foreground font-medium mb-1">{s.label}</p>
-            <p className="text-base font-semibold">{s.value}</p>
-            <p className="text-[10px] text-muted-foreground mb-2">/ {s.target}</p>
-            <div className="h-1 bg-muted rounded-full overflow-hidden">
-              <div className="h-full rounded-full" style={{ width: `${s.pct}%`, background: s.color }} />
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function InlineCard({ card }: { card: CardPayload }) {
-  if (card.type === "meal") return <MealCard />;
-  if (card.type === "checkin") return <CheckInCard />;
-  if (card.type === "stats") return <StatsCard />;
-  return null;
-}
-
-// ── Chat (main page) ──────────────────────────────────────────────────────────
-function ChatCore({ goTo, messages, setMessages, isTyping, setIsTyping }: {
-  goTo: (t: Tab) => void;
-  messages: Message[];
-  setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
-  isTyping: boolean;
-  setIsTyping: React.Dispatch<React.SetStateAction<boolean>>;
-}) {
-  const [input, setInput] = useState("");
-  const [isRecording, setIsRecording] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isTyping]);
-
-  function send(text: string) {
-    if (!text.trim()) return;
-    const userMsg: Message = { id: Date.now(), role: "user", text: text.trim(), time: nowStr() };
-    setMessages(p => [...p, userMsg]);
-    setInput("");
-    setIsTyping(true);
-
-    // 文本回复与卡片均由后端 /api/v1/chat 返回：前端不再做意图判断。
-    sendChat(text.trim())
-      .then(({ reply, card }) => {
-        const aiMsg: Message = { id: Date.now() + 1, role: "ai", text: reply, time: nowStr() };
-        if (card) aiMsg.card = { type: card.type, data: null };
-        setMessages(p => [...p, aiMsg]);
-      })
-      .catch(() => {
-        setMessages(p => [...p, {
-          id: Date.now() + 1, role: "ai",
-          text: "（连不上后端，确认 Go 服务已在 8091 启动）", time: nowStr(),
-        }]);
-      })
-      .finally(() => setIsTyping(false));
-  }
-
-  const suggestions = ["今天吃什么", "打卡任务", "今日数据", "如何改善睡眠？", "我需要多少蛋白质？"];
-
-  return (
-    <div className="flex flex-col h-full">
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto space-y-5 pb-2">
-        {messages.map((msg) => (
-          <div key={msg.id} className={`flex gap-2.5 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
-            {msg.role === "ai" && (
-              <div className="w-8 h-8 rounded-full bg-primary flex-shrink-0 flex items-center justify-center text-primary-foreground mt-0.5">
-                <Sparkles size={13} />
-              </div>
-            )}
-            <div className={`max-w-[84%] flex flex-col gap-1 ${msg.role === "user" ? "items-end" : "items-start"}`}>
-              {msg.text && (
-                <div className={`rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-line ${
-                  msg.role === "user"
-                    ? "bg-primary text-primary-foreground rounded-tr-sm"
-                    : "bg-card border border-border rounded-tl-sm"
-                }`}>
-                  {msg.text}
-                </div>
-              )}
-              {msg.card && <InlineCard card={msg.card} />}
-              <span className="text-[10px] text-muted-foreground px-1">{msg.time}</span>
-            </div>
-          </div>
-        ))}
-
-        {isTyping && (
-          <div className="flex gap-2.5 items-end">
-            <div className="w-8 h-8 rounded-full bg-primary flex-shrink-0 flex items-center justify-center text-primary-foreground">
-              <Sparkles size={13} />
-            </div>
-            <div className="bg-card border border-border rounded-2xl rounded-tl-sm px-4 py-3 flex gap-1.5 items-center">
-              {[0, 1, 2].map(i => (
-                <span key={i} className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
-              ))}
-            </div>
-          </div>
-        )}
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Suggestions */}
-      <div className="flex gap-2 overflow-x-auto no-scrollbar py-2">
-        {suggestions.map(s => (
-          <button
-            key={s}
-            onClick={() => send(s)}
-            className="flex-shrink-0 text-xs bg-secondary text-secondary-foreground px-3 py-1.5 rounded-full hover:bg-muted transition-colors font-medium border border-border"
-          >
-            {s}
-          </button>
-        ))}
-      </div>
-
-      {/* Input bar */}
-      <div className="flex items-center gap-2 pt-2 border-t border-border">
-        <button
-          onClick={() => setIsRecording(r => !r)}
-          className={`p-3 rounded-full transition-colors flex-shrink-0 ${
-            isRecording ? "bg-red-500 text-white animate-pulse" : "bg-secondary text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          {isRecording ? <MicOff size={18} /> : <Mic size={18} />}
-        </button>
-        <input
-          type="text"
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && send(input)}
-          placeholder="问我任何健康问题…"
-          className="flex-1 bg-input-background rounded-full px-4 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring border border-border"
-        />
-        <button
-          onClick={() => send(input)}
-          disabled={!input.trim()}
-          className="p-3 rounded-full bg-primary text-primary-foreground disabled:opacity-40 transition-opacity hover:opacity-90 flex-shrink-0"
-        >
-          <Send size={18} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ── Other pages (lite versions) ───────────────────────────────────────────────
-function ProfileTab() {
-  const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({ name: "李明", age: "28", height: "175", weight: "72", goal: "减脂塑形", activity: "中等活动", allergy: "无" });
-  const [saved, setSaved] = useState(false);
-  const bmi = (Number(form.weight) / (Number(form.height) / 100) ** 2).toFixed(1);
-  const bmiLabel = Number(bmi) < 18.5 ? "偏瘦" : Number(bmi) < 24 ? "正常" : Number(bmi) < 28 ? "偏胖" : "肥胖";
-  const goals = ["减脂塑形", "增肌力量", "保持健康", "控制体重", "改善睡眠"];
-  const activities = ["久坐办公", "轻度活动", "中等活动", "高强度运动"];
-
-  return (
-    <div className="space-y-4">
-      <div className="bg-card border border-border rounded-2xl p-5 flex items-center gap-4">
-        <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center text-2xl text-primary-foreground font-display">
-          {form.name[0]}
-        </div>
-        <div className="flex-1">
-          <h2 className="text-lg font-semibold">{form.name}</h2>
-          <p className="text-sm text-muted-foreground">{form.goal} · {form.activity}</p>
-          <span className="inline-block text-xs bg-secondary text-secondary-foreground px-2 py-1 rounded-full font-medium mt-1.5">
-            BMI {bmi} · {bmiLabel}
-          </span>
-        </div>
-        <button
-          onClick={() => { setEditing(e => !e); setSaved(false); }}
-          className={`p-2.5 rounded-xl border transition-colors ${editing ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground"}`}
-        >
-          <Edit3 size={16} />
-        </button>
-      </div>
-
-      <div className="bg-card border border-border rounded-2xl p-5 space-y-4">
-        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">基本信息</h3>
-        {([ ["姓名","name","text",""], ["年龄","age","number","岁"], ["身高","height","number","cm"], ["体重","weight","number","kg"], ["过敏","allergy","text",""] ] as const).map(([label, key, type, suffix]) => (
-          <div key={key} className="flex items-center justify-between">
-            <label className="text-sm text-muted-foreground w-20">{label}</label>
-            {editing
-              ? <div className="flex items-center gap-1 flex-1 justify-end">
-                  <input type={type} value={form[key]} onChange={e => setForm({...form, [key]: e.target.value})}
-                    className="w-32 text-right bg-input-background rounded-lg px-3 py-1.5 text-sm border border-border focus:outline-none focus:ring-1 focus:ring-ring" />
-                  {suffix && <span className="text-sm text-muted-foreground ml-1">{suffix}</span>}
-                </div>
-              : <span className="text-sm font-medium">{form[key]}{suffix ? " "+suffix : ""}</span>
-            }
-          </div>
-        ))}
-      </div>
-
-      <div className="bg-card border border-border rounded-2xl p-5 space-y-3">
-        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">健康目标</h3>
-        <div className="flex flex-wrap gap-2">
-          {goals.map(g => (
-            <button key={g} disabled={!editing} onClick={() => setForm({...form, goal: g})}
-              className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors disabled:cursor-default ${form.goal===g ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground"}`}>
-              {g}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="bg-card border border-border rounded-2xl p-5 space-y-3">
-        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">活动水平</h3>
-        <div className="grid grid-cols-2 gap-2">
-          {activities.map(a => (
-            <button key={a} disabled={!editing} onClick={() => setForm({...form, activity: a})}
-              className={`py-2 rounded-xl text-sm font-medium transition-colors disabled:cursor-default ${form.activity===a ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground"}`}>
-              {a}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {editing && (
-        <button onClick={() => { setSaved(true); setEditing(false); }}
-          className="w-full bg-primary text-primary-foreground rounded-xl py-3.5 font-semibold flex items-center justify-center gap-2 hover:opacity-90">
-          <Save size={16} /> 保存档案
-        </button>
-      )}
-      {saved && !editing && (
-        <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-emerald-700 text-sm">
-          <Check size={16} /> 档案已保存
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MealsTab() {
-  const meals = [
-    { time: "早餐", name: "燕麦粥 + 水煮蛋 + 牛奶", cal: 380, emoji: "🥣", tags: ["高蛋白", "低脂"] },
-    { time: "午餐", name: "清蒸鲈鱼 + 糙米饭 + 西兰花", cal: 560, emoji: "🐟", tags: ["均衡", "优质蛋白"] },
-    { time: "加餐", name: "希腊酸奶 + 蓝莓", cal: 140, emoji: "🫐", tags: ["益生菌", "抗氧化"] },
-    { time: "晚餐", name: "番茄牛肉汤 + 全麦面包", cal: 480, emoji: "🍲", tags: ["铁元素", "饱腹感"] },
-  ];
-  const [logged, setLogged] = useState(new Set<number>());
-  const totalCal = [...logged].reduce((s, i) => s + meals[i].cal, 0);
-
-  return (
-    <div className="space-y-4">
-      <div className="bg-card border border-border rounded-2xl p-4 flex items-center gap-4">
-        <div className="relative w-16 h-16">
-          <svg viewBox="0 0 64 64" className="w-16 h-16 -rotate-90">
-            <circle cx="32" cy="32" r="26" fill="none" stroke="var(--muted)" strokeWidth="7" />
-            <circle cx="32" cy="32" r="26" fill="none" stroke="var(--primary)" strokeWidth="7"
-              strokeLinecap="round"
-              strokeDasharray={`${2*Math.PI*26}`}
-              strokeDashoffset={`${2*Math.PI*26*(1-totalCal/1800)}`}
-              className="transition-all duration-700" />
-          </svg>
-          <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-sm font-bold">{totalCal}</span>
-            <span className="text-[8px] text-muted-foreground">kcal</span>
-          </div>
-        </div>
-        <div className="flex-1 space-y-1">
-          <div className="flex justify-between text-sm"><span className="text-muted-foreground">目标</span><span className="font-semibold">1800 kcal</span></div>
-          <div className="flex justify-between text-sm"><span className="text-muted-foreground">已记录</span><span className="font-semibold text-primary">{totalCal} kcal</span></div>
-          <div className="flex justify-between text-sm"><span className="text-muted-foreground">剩余</span><span className="font-semibold text-emerald-600">{1800-totalCal} kcal</span></div>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        {meals.map((m, i) => (
-          <button key={i} onClick={() => setLogged(prev => { const s=new Set(prev); s.has(i)?s.delete(i):s.add(i); return s; })}
-            className={`w-full flex items-center gap-3 bg-card border rounded-xl px-4 py-3.5 text-left transition-colors ${logged.has(i)?"border-primary/25 bg-emerald-50/40":"border-border hover:bg-secondary"}`}>
-            <span className="text-2xl">{m.emoji}</span>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-[10px] font-semibold text-muted-foreground uppercase">{m.time}</span>
-                <span className="text-xs text-orange-500 font-semibold">{m.cal} kcal</span>
-              </div>
-              <p className="text-sm font-medium">{m.name}</p>
-              <div className="flex gap-1.5 mt-1.5">
-                {m.tags.map(tag => <span key={tag} className="text-[10px] bg-secondary px-2 py-0.5 rounded-full font-medium text-secondary-foreground">{tag}</span>)}
-              </div>
-            </div>
-            <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${logged.has(i)?"bg-primary text-primary-foreground":"border-2 border-border"}`}>
-              {logged.has(i) && <Check size={12} />}
-            </div>
-          </button>
-        ))}
-      </div>
-
-      {/* Water */}
-      <div className="bg-card border border-border rounded-2xl p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold">今日饮水</h3>
-          <span className="text-xs text-blue-500 font-medium">4/8 杯</span>
-        </div>
-        <div className="flex gap-1.5">
-          {Array.from({length: 8}, (_, i) => (
-            <div key={i} className={`flex-1 h-8 rounded-lg ${i<4?"bg-blue-400":"bg-muted"}`} />
-          ))}
-        </div>
-        <p className="text-xs text-muted-foreground text-center mt-2">每杯 250ml · 已喝 1000ml</p>
-      </div>
-    </div>
-  );
-}
-
-function CheckInTab() {
-  const items = [
-    { label: "完成步数目标", emoji: "🏃", done: false, sub: "6,240 / 10,000 步" },
-    { label: "喝够 8 杯水", emoji: "💧", done: false, sub: "4 / 8 杯" },
-    { label: "7h 以上睡眠", emoji: "🌙", done: true, sub: "昨晚 7.2h" },
-    { label: "吃早饭", emoji: "☀️", done: true, sub: "完成" },
-    { label: "完成今日锻炼", emoji: "🔥", done: false, sub: "" },
-    { label: "晒 15 分钟太阳", emoji: "🌿", done: false, sub: "" },
-    { label: "冥想 5 分钟", emoji: "🧘", done: false, sub: "" },
-    { label: "摄入足够蔬果", emoji: "🥦", done: true, sub: "完成" },
-  ];
-  const [done, setDone] = useState(new Set(items.map((it, i) => it.done ? i : -1).filter(i => i >= 0)));
-  const pct = Math.round(done.size / items.length * 100);
-  const moods = ["😴","😕","😐","😊","🤩"];
-  const [mood, setMood] = useState<number|null>(null);
-  const streakDays = ["一","二","三","四","五","六","日"];
-  const streakDone = [true,true,true,true,true,true,false];
-
-  return (
-    <div className="space-y-4">
-      {/* Header card */}
-      <div className="bg-primary rounded-2xl p-5 text-primary-foreground">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <p className="text-sm opacity-70">今日完成进度</p>
-            <h2 className="text-3xl font-display">{pct}%</h2>
-          </div>
-          <div className="text-right">
-            <p className="text-xs opacity-70 mb-1">本周连续打卡</p>
-            <div className="flex gap-1">
-              {streakDays.map((d, i) => (
-                <div key={i} className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold ${streakDone[i]?"bg-white text-primary":"bg-white/20 text-white/50"}`}>
-                  {streakDone[i] ? "✓" : d}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div className="h-1.5 bg-white/20 rounded-full overflow-hidden">
-          <div className="h-full bg-white rounded-full transition-all duration-700" style={{ width: `${pct}%` }} />
-        </div>
-      </div>
-
-      {/* Mood */}
-      <div className="bg-card border border-border rounded-2xl p-4">
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">今日心情</p>
-        <div className="flex justify-around">
-          {moods.map((m, i) => (
-            <button key={i} onClick={() => setMood(i)}
-              className={`flex flex-col items-center gap-1 transition-transform ${mood===i?"scale-125":""}`}>
-              <span className="text-2xl">{m}</span>
-              {mood===i && <span className="w-1.5 h-1.5 rounded-full bg-primary" />}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Tasks */}
-      <div className="grid grid-cols-1 gap-2">
-        {items.map((it, i) => (
-          <button key={i} onClick={() => setDone(prev => { const s=new Set(prev); s.has(i)?s.delete(i):s.add(i); return s; })}
-            className={`flex items-center gap-3 rounded-xl px-4 py-3 text-left transition-all ${done.has(i)?"bg-emerald-50/60 border border-emerald-200":"bg-card border border-border hover:bg-secondary"}`}>
-            <span className="text-xl">{it.emoji}</span>
-            <div className="flex-1">
-              <p className={`text-sm font-medium ${done.has(i)?"line-through text-muted-foreground":""}`}>{it.label}</p>
-              {it.sub && <p className="text-[11px] text-muted-foreground mt-0.5">{it.sub}</p>}
-            </div>
-            <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${done.has(i)?"bg-primary text-primary-foreground":"border-2 border-border"}`}>
-              {done.has(i) && <Check size={12} />}
-            </div>
-          </button>
-        ))}
-      </div>
-
-      <button className="w-full bg-primary text-primary-foreground rounded-xl py-3.5 font-semibold flex items-center justify-center gap-2 hover:opacity-90">
-        <TrendingUp size={18} /> 查看本周健康报告
-      </button>
-    </div>
-  );
-}
-
-// ── Nav ────────────────────────────────────────────────────────────────────────
-function BottomNav({ active, setTab }: { active: Tab; setTab: (t: Tab) => void }) {
-  const sides: { id: Tab; icon: React.ReactNode; label: string }[] = [
-    { id: "home", icon: <Home size={20} />, label: "主页" },
-    { id: "meals", icon: <UtensilsCrossed size={20} />, label: "饮食" },
-    { id: "checkin", icon: <CheckSquare size={20} />, label: "打卡" },
-    { id: "profile", icon: <User size={20} />, label: "档案" },
-  ];
-
-  return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 bg-card border-t border-border">
-      <div className="flex justify-around items-center max-w-lg mx-auto px-2">
-        {/* Left two */}
-        {sides.slice(0, 2).map(item => (
-          <button key={item.id} onClick={() => setTab(item.id)}
-            className={`flex flex-col items-center gap-1 py-3 px-4 transition-colors ${active===item.id?"text-primary":"text-muted-foreground hover:text-foreground"}`}>
-            <span className={`transition-transform ${active===item.id?"scale-110":""}`}>{item.icon}</span>
-            <span className="text-[10px] font-medium">{item.label}</span>
-          </button>
-        ))}
-
-        {/* Center chat FAB — placeholder space */}
-        <div className="w-16" />
-
-        {/* Right two */}
-        {sides.slice(2).map(item => (
-          <button key={item.id} onClick={() => setTab(item.id)}
-            className={`flex flex-col items-center gap-1 py-3 px-4 transition-colors ${active===item.id?"text-primary":"text-muted-foreground hover:text-foreground"}`}>
-            <span className={`transition-transform ${active===item.id?"scale-110":""}`}>{item.icon}</span>
-            <span className="text-[10px] font-medium">{item.label}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* Floating center button — sits above nav */}
-      <div className="absolute left-1/2 -translate-x-1/2 -top-6">
-        <div className="w-14 h-14 rounded-full bg-primary shadow-lg shadow-primary/30 flex items-center justify-center border-4 border-background">
-          <Sparkles size={22} className="text-primary-foreground" />
-        </div>
-        <p className="text-[9px] font-semibold text-primary text-center mt-0.5 tracking-wide">AI 助手</p>
-      </div>
-    </nav>
-  );
-}
-
-// ── Login ─────────────────────────────────────────────────────────────────────
-// 说明：当前登录仅前端演示（假 setTimeout）。真鉴权（登录接口 + JWT + user_id）
-// 属 Phase 3，见 docs/plan.md；届时把 handleSubmit 换成真调后端即可，UI 不变。
-type AuthScreen = "login" | "register";
-
-function AuthPage({ onLogin }: { onLogin: () => void }) {
-  const [screen, setScreen] = useState<AuthScreen>("login");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [showPwd, setShowPwd] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
-  function handleSubmit() {
-    setError("");
-    if (!username.trim()) { setError("请输入用户名"); return; }
-    if (!password.trim()) { setError("请输入密码"); return; }
-    if (screen === "register" && password !== confirm) { setError("两次密码不一致"); return; }
-    setLoading(true);
-    setTimeout(() => { setLoading(false); onLogin(); }, 1000);
-  }
-
-  return (
-    <div className="min-h-screen bg-background flex flex-col" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
-        .font-display { font-family: 'DM Serif Display', serif; }
-        * { scrollbar-width: none; }
-        *::-webkit-scrollbar { display: none; }
-      `}</style>
-
-      {/* Top illustration */}
-      <div className="bg-primary flex-none flex flex-col items-center justify-end pb-10 pt-16 px-8 relative overflow-hidden" style={{ minHeight: "38vh" }}>
-        {/* Decorative circles */}
-        <div className="absolute top-0 left-0 w-48 h-48 bg-white/5 rounded-full -translate-x-20 -translate-y-20" />
-        <div className="absolute top-8 right-0 w-32 h-32 bg-white/5 rounded-full translate-x-12" />
-        <div className="absolute bottom-0 left-1/2 w-64 h-64 bg-white/5 rounded-full -translate-x-1/2 translate-y-32" />
-
-        {/* Logo mark */}
-        <div className="relative mb-5 w-16 h-16 rounded-2xl bg-white/15 flex items-center justify-center backdrop-blur-sm border border-white/20">
-          <Leaf size={28} className="text-white" />
-        </div>
-        <h1 className="font-display text-3xl text-white text-center leading-tight">健康管理助手</h1>
-        <p className="text-white/70 text-sm text-center mt-2">AI 驱动的个人健康管理平台</p>
-      </div>
-
-      {/* Card */}
-      <div className="flex-1 bg-background rounded-t-3xl -mt-4 px-6 pt-8 pb-10 flex flex-col max-w-lg mx-auto w-full">
-        {/* Tab switcher */}
-        <div className="flex bg-muted rounded-xl p-1 mb-7">
-          {(["login", "register"] as const).map((s) => (
-            <button
-              key={s}
-              onClick={() => { setScreen(s); setError(""); }}
-              className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${screen === s ? "bg-card shadow-sm text-foreground" : "text-muted-foreground"}`}
-            >
-              {s === "login" ? "登录" : "注册"}
-            </button>
-          ))}
-        </div>
-
-        <div className="space-y-4 flex-1">
-          {/* Username */}
-          <div>
-            <label className="block text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider">用户名</label>
-            <div className="flex items-center bg-input-background border border-border rounded-xl px-4 py-3 gap-3 focus-within:ring-1 focus-within:ring-ring transition-shadow">
-              <User size={16} className="text-muted-foreground flex-shrink-0" />
-              <input
-                type="text"
-                placeholder="请输入用户名"
-                value={username}
-                onChange={e => setUsername(e.target.value)}
-                className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground"
-              />
-            </div>
-          </div>
-
-          {/* Password */}
-          <div>
-            <label className="block text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider">密码</label>
-            <div className="flex items-center bg-input-background border border-border rounded-xl px-4 py-3 gap-3 focus-within:ring-1 focus-within:ring-ring transition-shadow">
-              <Lock size={16} className="text-muted-foreground flex-shrink-0" />
-              <input
-                type={showPwd ? "text" : "password"}
-                placeholder="请输入密码"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && handleSubmit()}
-                className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground"
-              />
-              <button onClick={() => setShowPwd(p => !p)} className="text-muted-foreground hover:text-foreground transition-colors">
-                {showPwd ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-          </div>
-
-          {/* Confirm password (register only) */}
-          {screen === "register" && (
-            <div>
-              <label className="block text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider">确认密码</label>
-              <div className="flex items-center bg-input-background border border-border rounded-xl px-4 py-3 gap-3 focus-within:ring-1 focus-within:ring-ring transition-shadow">
-                <Lock size={16} className="text-muted-foreground flex-shrink-0" />
-                <input
-                  type={showPwd ? "text" : "password"}
-                  placeholder="再次输入密码"
-                  value={confirm}
-                  onChange={e => setConfirm(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && handleSubmit()}
-                  className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground"
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Forgot password */}
-          {screen === "login" && (
-            <div className="text-right">
-              <button className="text-xs text-primary font-medium hover:underline">忘记密码？</button>
-            </div>
-          )}
-
-          {/* Error */}
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-3">
-              {error}
-            </div>
-          )}
-        </div>
-
-        {/* Submit */}
-        <div className="mt-8 space-y-4">
-          <button
-            onClick={handleSubmit}
-            disabled={loading}
-            className="w-full bg-primary text-primary-foreground rounded-xl py-3.5 font-semibold text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-opacity disabled:opacity-70"
-          >
-            {loading ? (
-              <span className="flex gap-1.5">
-                {[0,1,2].map(i => <span key={i} className="w-1.5 h-1.5 rounded-full bg-white/70 animate-bounce" style={{ animationDelay: `${i*0.15}s` }} />)}
-              </span>
-            ) : (screen === "login" ? "登录" : "注册并开始使用")}
-          </button>
-
-          {/* Divider */}
-          <div className="flex items-center gap-3">
-            <div className="flex-1 h-px bg-border" />
-            <span className="text-xs text-muted-foreground">或</span>
-            <div className="flex-1 h-px bg-border" />
-          </div>
-
-          {/* Guest */}
-          <button
-            onClick={onLogin}
-            className="w-full bg-secondary text-secondary-foreground rounded-xl py-3.5 font-semibold text-sm hover:bg-muted transition-colors"
-          >
-            体验演示版本
-          </button>
-
-          <p className="text-center text-xs text-muted-foreground">
-            登录即代表同意
-            <button className="text-primary font-medium mx-0.5 hover:underline">服务条款</button>
-            与
-            <button className="text-primary font-medium mx-0.5 hover:underline">隐私政策</button>
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── App root ──────────────────────────────────────────────────────────────────
 export default function App() {
-  const [authed, setAuthed] = useState(false);
-  const [tab, setTab] = useState<Tab | "chat">("chat");
-
-  // 聊天状态提升到 App（跨 tab 不卸载的公共祖先），
-  // 否则切走时 ChatCore 被卸载，其内部 useState 会被销毁，导致对话丢失。
+  const [tags, setTags] = useState<StatusTagDef[]>(INITIAL_TAGS);
+  const [actions, setActions] = useState<ActionItem[]>(initialActions);
   const [messages, setMessages] = useState<Message[]>([
     {
-      id: 1, role: "ai", time: "09:00",
-      text: "你好，我是你的健康管理助手 🌿\n\n可以问我关于饮食、运动、睡眠的任何问题，或者直接说「今天吃什么」「打卡任务」「今日数据」——我会帮你一键查看。",
+      id: "welcome",
+      type: "ai",
+      content: "太好了！精气神回来了 ✨ 中午想吃点什么，还是看看本周的总结？",
     },
+    { id: "meal-card", type: "meal-card", content: null },
   ]);
-  const [isTyping, setIsTyping] = useState(false);
 
-  if (!authed) return <AuthPage onLogin={() => setAuthed(true)} />;
+  const [pendingConfirmation, setPendingConfirmation] =
+    useState<Message | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  const titles: Record<string, string> = {
-    chat: "健康助手",
-    home: "健康管理",
-    profile: "个人档案",
-    meals: "今天吃什么",
-    checkin: "今日打卡",
+  // Auto-scroll to bottom on new messages
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTo({
+        top: scrollRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  }, [messages, pendingConfirmation]);
+
+  // Helpers
+  const latestMealId = [...messages]
+    .reverse()
+    .find((m) => m.type === "meal-suggestion")?.id;
+  const latestActionId = [...messages]
+    .reverse()
+    .find((m) => m.type === "action-card")?.id;
+
+  const dismissMorningGreeting = () => {
+    setMessages((prev) =>
+      prev.filter((m) => m.id !== "morning-greeting")
+    );
+  };
+
+  const handleMorningReply = (reply: "recovered" | "still-tired") => {
+    dismissMorningGreeting();
+
+    if (reply === "recovered") {
+      setTags((prev) =>
+        prev.map((t) =>
+          t.id === "energy" ? { ...t, state: "dismissed" } : t
+        )
+      );
+      setTimeout(() => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            type: "ai",
+            content:
+              "太好了！精气神回来了 ✨ 今天继续保持，身体在慢慢向好的方向走。",
+          },
+        ]);
+      }, 400);
+    } else {
+      setTags((prev) =>
+        prev.map((t) =>
+          t.id === "energy" ? { ...t, state: "active" } : t
+        )
+      );
+      setTimeout(() => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            type: "ai",
+            content:
+              "没关系，身体需要休息的信号值得被认真对待 🫧 今天可以减少剧烈运动，多喝温水。",
+          },
+        ]);
+      }, 400);
+    }
+  };
+
+  const handleSendMessage = async (text: string) => {
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      type: "user",
+      content: text,
+    };
+    setMessages((prev) => [...prev, userMessage]);
+
+    // 血糖录入 → 确认卡（本地演示交互，暂不走后端）。
+    if (text.includes("血糖") && /\d/.test(text)) {
+      const value = text.match(/\d+(\.\d+)?/)?.[0] || "0";
+      const confirmation: Message = {
+        id: Date.now().toString() + "-confirm",
+        type: "confirmation",
+        content: {
+          type: "blood-sugar",
+          data: { label: "今日血糖", value, unit: "mmol/L" },
+        },
+      };
+      setPendingConfirmation(confirmation);
+      return;
+    }
+
+    // 其余自由对话走真实 chat 接口。先插入占位气泡，返回后原地替换。
+    // 从现有消息里抽出文本类（user/ai）作为多轮上下文（不含卡片等非文本消息）。
+    const history: ChatMessage[] = messages
+      .filter(
+        (m) =>
+          (m.type === "user" || m.type === "ai") &&
+          typeof m.content === "string"
+      )
+      .map((m) => ({
+        role: m.type === "user" ? "user" : "assistant",
+        content: m.content as string,
+      }));
+
+    const typingId = Date.now().toString() + "-typing";
+    setMessages((prev) => [
+      ...prev,
+      { id: typingId, type: "ai", content: "正在思考…" },
+    ]);
+
+    try {
+      let acc = "";
+      await sendChatStream(text, history, (delta) => {
+        acc += delta;
+        setMessages((prev) =>
+          prev.map((m) => (m.id === typingId ? { ...m, content: acc } : m))
+        );
+      });
+    } catch {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === typingId
+            ? { ...m, content: "抱歉，暂时没能连上健康管家，请稍后再试。" }
+            : m
+        )
+      );
+    }
+  };
+
+  const handleAcceptMeal = () => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        type: "ai",
+        content:
+          "太棒了！记得慢慢咀嚼，让身体更好地吸收营养。餐后记得测一下血糖哦～",
+      },
+    ]);
+  };
+
+  const handleRegenerateMeal = () => {
+    const newMeal: Message = {
+      id: Date.now().toString(),
+      type: "meal-suggestion",
+      content: {
+        meal: "🌅 午餐建议",
+        title: "烤三文鱼配时蔬",
+        emoji: "🐟",
+        description: "富含 Omega-3 的三文鱼配上低碳水蔬菜，既美味又健康。",
+        ingredients: ["三文鱼", "西兰花", "芦笋", "柠檬", "橄榄油"],
+        benefits:
+          "三文鱼中的 Omega-3 脂肪酸有助于改善胰岛素敏感性，搭配高纤维蔬菜能有效控制血糖上升速度。",
+        gi: 28,
+      },
+    };
+    setMessages((prev) => [...prev, newMeal]);
+  };
+
+  const handleToggleAction = (id: string) => {
+    const updated = actions.map((a) =>
+      a.id === id ? { ...a, completed: !a.completed } : a
+    );
+    setActions(updated);
+    setMessages((prev) =>
+      prev.map((msg) =>
+        msg.type === "action-card" && msg.id === latestActionId
+          ? { ...msg, content: updated }
+          : msg
+      )
+    );
+  };
+
+  const handleConfirmData = () => {
+    if (pendingConfirmation) {
+      setMessages((prev) => [...prev, pendingConfirmation]);
+      setPendingConfirmation(null);
+      setTimeout(() => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            type: "ai",
+            content:
+              "收到！你的血糖数据已记录。目前数值在正常范围内，继续保持哦～",
+          },
+        ]);
+      }, 500);
+    }
+  };
+
+  const handleCancelConfirmation = () => {
+    setPendingConfirmation(null);
   };
 
   return (
-    <div className="min-h-screen bg-background" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
-        .font-display { font-family: 'DM Serif Display', serif; }
-        * { scrollbar-width: none; }
-        *::-webkit-scrollbar { display: none; }
-      `}</style>
+    <div className="size-full flex flex-col overflow-hidden bg-background">
+      <StatusTags tags={tags} />
 
-      <div className="max-w-lg mx-auto relative flex flex-col" style={{ minHeight: "100dvh" }}>
-        {/* Header */}
-        <header className="sticky top-0 z-40 bg-background/90 backdrop-blur-sm border-b border-border px-4 py-4 flex items-center gap-3">
-          {tab === "chat" && (
-            <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground">
-              <Sparkles size={14} />
-            </div>
-          )}
-          <div className="flex-1">
-            <h1 className="text-base font-semibold leading-none">{titles[tab]}</h1>
-            {tab === "chat" && <p className="text-[11px] text-emerald-500 font-medium mt-0.5">● 在线</p>}
-          </div>
-          {tab === "chat" && (
-            <button className="p-2 text-muted-foreground hover:text-foreground">
-              <Volume2 size={18} />
-            </button>
-          )}
-        </header>
+      <div ref={scrollRef} className="flex-1 overflow-y-auto pb-36">
+        <div className="min-h-full flex flex-col justify-center pt-2">
+          <AnimatePresence>
+            {messages.map((message) => {
+              switch (message.type) {
+                case "morning-greeting":
+                  return (
+                    <MorningGreetingCard
+                      key={message.id}
+                      onReply={handleMorningReply}
+                    />
+                  );
+                case "user":
+                  return (
+                    <UserMessage key={message.id} message={message.content} />
+                  );
+                case "ai":
+                  return (
+                    <AIMessage key={message.id} message={message.content} />
+                  );
+                case "meal-card":
+                  return <MealCard key={message.id} />;
+                case "meal-suggestion":
+                  return (
+                    <MealSuggestionCard
+                      key={message.id}
+                      {...message.content}
+                      collapsed={message.id !== latestMealId}
+                      onAccept={handleAcceptMeal}
+                      onRegenerate={handleRegenerateMeal}
+                    />
+                  );
+                case "action-card":
+                  return (
+                    <ActionCard
+                      key={message.id}
+                      actions={
+                        message.id === latestActionId
+                          ? actions
+                          : message.content
+                      }
+                      collapsed={message.id !== latestActionId}
+                      onToggle={handleToggleAction}
+                    />
+                  );
+                case "warning":
+                  return (
+                    <WarningCard key={message.id} {...message.content} />
+                  );
+                case "confirmation":
+                  return (
+                    <ConfirmationCard
+                      key={message.id}
+                      {...message.content}
+                      onConfirm={handleConfirmData}
+                      onCancel={handleCancelConfirmation}
+                    />
+                  );
+                default:
+                  return null;
+              }
+            })}
+          </AnimatePresence>
 
-        {/* Content */}
-        <main className="flex-1 px-4 pt-4 pb-28 overflow-y-auto flex flex-col">
-          {tab === "chat" && (
-            <ChatCore
-              goTo={(t) => setTab(t)}
-              messages={messages}
-              setMessages={setMessages}
-              isTyping={isTyping}
-              setIsTyping={setIsTyping}
-            />
-          )}
-          {tab === "home" && (
-            <div className="space-y-4">
-              {/* Home — compact overview with chat CTA */}
-              <div className="bg-primary rounded-2xl p-5 text-primary-foreground relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-28 h-28 bg-white/5 rounded-full -translate-y-8 translate-x-8" />
-                <p className="text-sm opacity-70">2025年7月5日 · 周六</p>
-                <h1 className="text-2xl font-display mt-1">早安，李明 👋</h1>
-                <p className="text-sm mt-2 opacity-80">今日健康指数 82 · 连续打卡 7 天 🔥</p>
-                <button onClick={() => setTab("chat")}
-                  className="mt-4 flex items-center gap-2 bg-white/15 hover:bg-white/25 transition-colors rounded-full px-4 py-2 text-sm font-medium">
-                  <Sparkles size={14} /> 问问健康助手 <ArrowRight size={14} />
-                </button>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { label: "步数", value: "6,240", target: "10,000", pct: 62, color: "#2E5E3E", bg: "bg-emerald-50", tc: "text-emerald-700" },
-                  { label: "饮水", value: "1.4L", target: "2.0L", pct: 70, color: "#3B82F6", bg: "bg-blue-50", tc: "text-blue-600" },
-                  { label: "睡眠", value: "7.2h", target: "8.0h", pct: 90, color: "#7B5EA7", bg: "bg-violet-50", tc: "text-violet-600" },
-                  { label: "热量", value: "1,280", target: "1,800", pct: 71, color: "#F97316", bg: "bg-orange-50", tc: "text-orange-600" },
-                ].map(s => (
-                  <div key={s.label} className="bg-card border border-border rounded-xl p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className={`text-xs font-semibold ${s.tc}`}>{s.label}</span>
-                    </div>
-                    <p className="text-xl font-bold">{s.value}</p>
-                    <p className="text-xs text-muted-foreground mb-2">/ {s.target}</p>
-                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                      <div className="h-full rounded-full" style={{ width: `${s.pct}%`, background: s.color }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                {([["meals","今天吃什么","🍽️"],["checkin","今日打卡","✅"],["profile","我的档案","👤"]] as const).map(([t, label, icon]) => (
-                  <button key={t} onClick={() => setTab(t)}
-                    className="bg-card border border-border rounded-xl py-4 flex flex-col items-center gap-2 hover:bg-secondary transition-colors">
-                    <span className="text-xl">{icon}</span>
-                    <span className="text-xs font-medium text-muted-foreground">{label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          {tab === "profile" && <ProfileTab />}
-          {tab === "meals" && <MealsTab />}
-          {tab === "checkin" && <CheckInTab />}
-        </main>
-
-        {/* Bottom nav with chat FAB */}
-        <nav className="fixed bottom-0 left-0 right-0 z-50 bg-card border-t border-border">
-          <div className="flex justify-around items-center max-w-lg mx-auto px-2">
-            {([["home","主页",<Home size={20}/>],["meals","饮食",<UtensilsCrossed size={20}/>]] as const).map(([id, label, icon]) => (
-              <button key={id} onClick={() => setTab(id)}
-                className={`flex flex-col items-center gap-1 py-3 px-5 transition-colors ${tab===id?"text-primary":"text-muted-foreground"}`}>
-                <span className={`transition-transform ${tab===id?"scale-110":""}`}>{icon}</span>
-                <span className="text-[10px] font-medium">{label}</span>
-              </button>
-            ))}
-
-            {/* FAB */}
-            <div className="flex flex-col items-center pb-1">
-              <button onClick={() => setTab("chat")}
-                className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all -mt-6 border-4 border-background ${tab==="chat"?"bg-foreground":"bg-primary"} shadow-primary/25`}>
-                <Sparkles size={22} className="text-primary-foreground" />
-              </button>
-              <span className={`text-[10px] font-semibold mt-0.5 ${tab==="chat"?"text-foreground":"text-primary"}`}>AI 助手</span>
-            </div>
-
-            {([["checkin","打卡",<CheckSquare size={20}/>],["profile","档案",<User size={20}/>]] as const).map(([id, label, icon]) => (
-              <button key={id} onClick={() => setTab(id)}
-                className={`flex flex-col items-center gap-1 py-3 px-5 transition-colors ${tab===id?"text-primary":"text-muted-foreground"}`}>
-                <span className={`transition-transform ${tab===id?"scale-110":""}`}>{icon}</span>
-                <span className="text-[10px] font-medium">{label}</span>
-              </button>
-            ))}
-          </div>
-        </nav>
+          <AnimatePresence>
+            {pendingConfirmation && (
+              <ConfirmationCard
+                key={pendingConfirmation.id}
+                {...pendingConfirmation.content}
+                onConfirm={handleConfirmData}
+                onCancel={handleCancelConfirmation}
+              />
+            )}
+          </AnimatePresence>
+        </div>
       </div>
+
+      <InputDock
+        onSendMessage={handleSendMessage}
+        onVoiceInput={() => {}}
+      />
     </div>
   );
 }

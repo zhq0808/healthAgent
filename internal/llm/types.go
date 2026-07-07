@@ -29,5 +29,19 @@ type chatCompletionResponse struct {
 	} `json:"error"`
 }
 
+// chatCompletionChunk 是 stream=true 时 SSE 每帧 `data:` 的结构（仅解析所需字段）。
+// 与非流式的区别：内容在 delta.content 里逐段下发，而非一次性的 message.content。
+type chatCompletionChunk struct {
+	Choices []struct {
+		Delta struct {
+			Content string `json:"content"`
+		} `json:"delta"`
+	} `json:"choices"`
+	Error *struct {
+		Message string `json:"message"`
+		Type    string `json:"type"`
+	} `json:"error"`
+}
+
 // maxResponseBytes 是响应体读取上限（1MB），防止异常大响应耗尽内存。
 const maxResponseBytes = 1 << 20

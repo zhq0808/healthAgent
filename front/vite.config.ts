@@ -35,7 +35,7 @@ export default defineConfig({
   },
 
   server: {
-    // 显式绑 IPv4，否则 Vite 默认只监听 ::1(IPv6)，Windows 上 localhost/127.0.0.1 会连接被拒
+    // 显式绑 IPv4，否则 Vite 默认只监听 ::1(IPv6)，Windows 上 127.0.0.1 会连接被拒
     host: '127.0.0.1',
     port: 5173,
     strictPort: true,
