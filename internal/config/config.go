@@ -11,7 +11,9 @@ import (
 type Config struct {
 	HTTP     HTTPConfig   `yaml:"http"     env-prefix:"HTTP_"`
 	DeepSeek LLMConfig    `yaml:"deepseek" env-prefix:"DEEPSEEK_"`
-	OpenAI   OpenAIConfig `yaml:"openai"   env-prefix:"OPENAI_"` // 新增 OpenAI 配置入口
+	OpenAI   OpenAIConfig `yaml:"openai"   env-prefix:"OPENAI_"`
+	Postgres PostgresConfig `yaml:"postgres" env-prefix:"POSTGRES_"`
+	Redis    RedisConfig  `yaml:"redis"    env-prefix:"REDIS_"`
 	Log      LogConfig    `yaml:"log"      env-prefix:"LOG_"`
 }
 
@@ -39,6 +41,34 @@ type OpenAIConfig struct {
 type LogConfig struct {
 	Level string `yaml:"level" env:"LEVEL" env-default:"info"`
 	Debug bool   `yaml:"debug" env:"DEBUG" env-default:"false"`
+}
+
+// PostgresConfig 是 PostgreSQL 连接配置。密码走环境变量（POSTGRES_PASSWORD），不写进 yaml。
+type PostgresConfig struct {
+	Host            string `yaml:"host"              env:"HOST"              env-default:"127.0.0.1"`
+	Port            int    `yaml:"port"              env:"PORT"              env-default:"5433"`
+	User            string `yaml:"user"              env:"USER"              env-default:"postgres"`
+	Password        string `yaml:"-"                 env:"PASSWORD"          env-default:"root"`
+	DBName          string `yaml:"dbname"            env:"DBNAME"            env-default:"health_db"`
+	MaxOpenConns    int    `yaml:"max_open_conns"    env:"MAX_OPEN_CONNS"    env-default:"50"`
+	MaxIdleConns    int    `yaml:"max_idle_conns"    env:"MAX_IDLE_CONNS"    env-default:"10"`
+	ConnMaxLifetime int    `yaml:"conn_max_lifetime" env:"CONN_MAX_LIFETIME" env-default:"3600"` // 单位：秒
+}
+
+// DSN 组装 PostgreSQL 连接串（URL 形式，pgx 可直接解析）。
+// sslmode=disable 用于本地/内网；生产跨网络应设 require / verify-full。
+func (c PostgresConfig) DSN() string {
+	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
+		c.User, c.Password, c.Host, c.Port, c.DBName)
+}
+
+// RedisConfig 是 Redis 连接配置。密码走环境变量（REDIS_PASSWORD），本地无密码时留空。
+type RedisConfig struct {
+	Addr         string `yaml:"addr"           env:"ADDR"           env-default:"127.0.0.1:6379"`
+	Password     string `yaml:"-"              env:"PASSWORD"`
+	DB           int    `yaml:"db"             env:"DB"             env-default:"0"`
+	PoolSize     int    `yaml:"pool_size"      env:"POOL_SIZE"      env-default:"50"`
+	MinIdleConns int    `yaml:"min_idle_conns" env:"MIN_IDLE_CONNS" env-default:"5"`
 }
 
 // Load 加载配置：cleanenv 按扩展名解析 yaml 文件，并用环境变量覆盖。

@@ -7,6 +7,23 @@ deepseek:
   model: "deepseek-chat"
   timeout: 30
 
+# PostgreSQL（对话历史 source of truth）。密码走 .env 的 POSTGRES_PASSWORD，不写这里。
+postgres:
+  host: "127.0.0.1"
+  port: 5433            # 对齐 docker-compose 暴露的宿主机端口
+  user: "postgres"
+  dbname: "health_db"
+  max_open_conns: 50    # 连接池：最大打开连接数
+  max_idle_conns: 10    # 空闲连接数
+  conn_max_lifetime: 3600  # 连接最长存活（秒）
+
+# Redis（缓热上下文）。密码走 .env 的 REDIS_PASSWORD，本地无密码留空。
+redis:
+  addr: "127.0.0.1:6380"  # 对齐 docker-compose 暴露的宿主机端口
+  db: 0
+  pool_size: 50
+  min_idle_conns: 5
+
 log:
   level: "info"   # debug | info | warn | error
   # debug=true 时才允许打印敏感原文，仅限本地，线上禁止开启

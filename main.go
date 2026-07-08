@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"healthAgent/internal/handler"
 	"healthAgent/internal/llm"
 	"healthAgent/internal/logger"
+	"healthAgent/internal/store"
 )
 
 func main() {
@@ -44,6 +46,25 @@ func run() error {
 		log.Warn("未配置 DEEPSEEK_API_KEY，对话将返回降级兜底回复（请在 .env 中填入）")
 	}
 	client := llm.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL, cfg.DeepSeek.Model, time.Duration(cfg.DeepSeek.TimeoutSeconds)*time.Second)
+
+	// 3.1 初始化 PostgreSQL（对话历史 source of truth）。连不上直接失败——不允许无存储启动。
+	db, err := store.NewPostgres(cfg.Postgres)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	log.Info("PostgreSQL 连接就绪", "addr", cfg.Postgres.Host+":"+strconv.Itoa(cfg.Postgres.Port), "db", cfg.Postgres.DBName)
+
+	// 3.2 初始化 Redis（缓热上下文）。连不上不阻断启动，运行时降级为直读 MySQL。
+	rdb, err := store.NewRedis(cfg.Redis)
+	if err != nil {
+		log.Warn("Redis 连接失败，将降级为直读 MySQL", "error", err)
+		rdb = nil
+	} else {
+		defer rdb.Close()
+		log.Info("Redis 连接就绪", "addr", cfg.Redis.Addr)
+	}
+	_ = rdb // TODO(P2): 注入 repository / server，当前仅完成建连与优雅关闭
 
 	// writeTimeout 是单个请求最长处理时间（LLM 调用可能较慢，给足余量）。
 	// 优雅关闭的等待时间必须 >= 它，否则在途慢请求会被提前掐断，见下方 shutdownGrace。

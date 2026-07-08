@@ -1,30 +1,45 @@
 # 健康管理 Agent 本地依赖。
 # 常用命令（在本目录执行）：
-#   docker compose up -d          # 后台启动
-#   docker compose ps             # 查看状态
-#   docker compose logs -f mysql  # 看日志
-#   docker compose down           # 停止并删除容器（数据保留在 volume）
-#   docker compose down -v        # 连数据一起删
+#   docker compose up -d             # 后台启动
+#   docker compose ps                # 查看状态
+#   docker compose logs -f postgres  # 看日志
+#   docker compose down              # 停止并删除容器（数据保留在 volume）
+#   docker compose down -v           # 连数据一起删
 
 services:
-  mysql:
-    image: mysql:8.0
-    container_name: health-mysql
+  postgres:
+    image: postgres:16-alpine
+    container_name: health-postgres
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: health_db
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: health_db
       TZ: Asia/Shanghai
     ports:
-      - "3308:3306" # 宿主机 3308，避开 loan 的 3307
+      - "5433:5432" # 宿主机 5433，避开默认 5432
     volumes:
-      - health_mysql_data:/var/lib/mysql
-    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+      - health_pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d health_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: health-redis
+    restart: always
+    ports:
+      - "6380:6379" # 宿主机 6380，避开其他项目占用的 6379
+    volumes:
+      - health_redis_data:/data
+    command: redis-server --appendonly yes # 开 AOF 持久化，重启不丢缓存（缓存可丢，但省一次冷启动回源）
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
 
 volumes:
-  health_mysql_data:
+  health_pg_data:
+  health_redis_data:
