@@ -87,7 +87,11 @@ func run() error {
 	chatService := service.NewChatService(client)
 	identityRepository := store.NewPostgresIdentityRepository(db)
 	identityService := service.NewIdentityService(identityRepository, time.Duration(cfg.Identity.GuestTokenTTLHours)*time.Hour)
-	srvHandler := handler.NewServer(chatService, identityService, cfg.Identity, log).Handler()
+	sessionRepository := store.NewPostgresSessionRepository(db)
+	sessionService := service.NewSessionService(sessionRepository)
+	messageRepository := store.NewPostgresMessageRepository(db)
+	messageService := service.NewMessageService(messageRepository)
+	srvHandler := handler.NewServer(chatService, identityService, sessionService, messageService, cfg.Identity, log).Handler()
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTP.Port,
 		Handler:           srvHandler,

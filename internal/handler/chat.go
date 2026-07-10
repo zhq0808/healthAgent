@@ -6,20 +6,23 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"healthAgent/internal/llm"
+	"healthAgent/internal/service"
 )
 
 // chatRequest 是对话接口的请求体。
-// 当前原型通过 body 传入 user_id；正式登录接入后必须由鉴权层校验它。
 type chatRequest struct {
-	UserID    string `json:"user_id"`
-	SessionID string `json:"session_id"`
-	Message   string `json:"message"`
+	SessionID       string `json:"session_id"`
+	ClientMessageID string `json:"client_message_id"`
+	Message         string `json:"message"`
 }
+
+var clientMessageIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
 // chatStreamHandler 处理一条用户消息，以 SSE 流式把模型回复逐段推给前端。
 // Content-Type: text/event-stream，每收到一段增量就 `data: {json}\n\n` 刷一帧，
@@ -30,18 +33,63 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 		fail(c, http.StatusBadRequest, CodeBadRequest, "请求格式错误")
 		return
 	}
-	req.UserID = strings.TrimSpace(req.UserID)
-	if req.UserID == "" {
-		fail(c, http.StatusBadRequest, CodeBadRequest, "用户ID不能为空")
+	req.SessionID = strings.TrimSpace(req.SessionID)
+	req.ClientMessageID = strings.ToLower(strings.TrimSpace(req.ClientMessageID))
+	if !validSessionID(req.SessionID) {
+		fail(c, http.StatusBadRequest, CodeBadRequest, "会话ID格式错误")
 		return
 	}
-	req.SessionID = strings.TrimSpace(req.SessionID)
-	if req.SessionID == "" {
-		fail(c, http.StatusBadRequest, CodeBadRequest, "会话ID不能为空")
+	if !clientMessageIDPattern.MatchString(req.ClientMessageID) {
+		fail(c, http.StatusBadRequest, CodeBadRequest, "客户端消息ID格式错误")
 		return
 	}
 	if strings.TrimSpace(req.Message) == "" {
 		fail(c, http.StatusBadRequest, CodeBadRequest, "消息不能为空")
+		return
+	}
+	userID, ok := UserIDFromContext(c.Request.Context())
+	if !ok {
+		fail(c, http.StatusUnauthorized, CodeUnauthorized, "请先建立访客身份")
+		return
+	}
+	if err := s.sessions.RequireOwnedActive(c.Request.Context(), userID, req.SessionID); err != nil {
+		if errors.Is(err, service.ErrSessionNotFound) {
+			fail(c, http.StatusNotFound, CodeNotFound, "会话不存在")
+			return
+		}
+		s.log.Error("校验会话归属失败",
+			"trace_id", TraceIDFromContext(c.Request.Context()),
+			"error", err,
+		)
+		fail(c, http.StatusInternalServerError, CodeInternal, "会话服务暂时不可用")
+		return
+	}
+
+	messageResult, err := s.messages.AppendUserMessage(c.Request.Context(), service.AppendUserMessageRequest{
+		UserID:          userID,
+		SessionID:       req.SessionID,
+		ClientMessageID: req.ClientMessageID,
+		Content:         strings.TrimSpace(req.Message),
+		TraceID:         TraceIDFromContext(c.Request.Context()),
+	})
+	if errors.Is(err, service.ErrClientMessageConflict) {
+		fail(c, http.StatusConflict, CodeConflict, "客户端消息ID已用于其他内容")
+		return
+	}
+	if errors.Is(err, service.ErrSessionNotFound) {
+		fail(c, http.StatusNotFound, CodeNotFound, "会话不存在")
+		return
+	}
+	if err != nil {
+		s.log.Error("用户消息落库失败",
+			"trace_id", TraceIDFromContext(c.Request.Context()),
+			"error", err,
+		)
+		fail(c, http.StatusInternalServerError, CodeInternal, "消息服务暂时不可用")
+		return
+	}
+	if !messageResult.Created {
+		fail(c, http.StatusConflict, CodeConflict, "消息已提交，请勿重复发送")
 		return
 	}
 
@@ -86,7 +134,7 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 		return writeSSE("", string(payload))
 	}
 
-	err := s.chat.Stream(ctx, req.Message, sendDelta)
+	err = s.chat.Stream(ctx, req.Message, sendDelta)
 	if err != nil {
 		// 未配置 Key：不算服务故障，当作一段普通回复流出去，方便本地先跑通链路。
 		if errors.Is(err, llm.ErrNotConfigured) {

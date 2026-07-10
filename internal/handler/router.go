@@ -15,17 +15,21 @@ import (
 type Server struct {
 	chat           *service.ChatService
 	identity       *service.IdentityService
+	sessions       *service.SessionService
+	messages       *service.MessageService
 	identityConfig config.IdentityConfig
 	log            *slog.Logger
 	engine         *gin.Engine
 }
 
 // NewServer 构建 HTTP Server 并注册路由与中间件。
-func NewServer(chat *service.ChatService, identity *service.IdentityService, identityConfig config.IdentityConfig, log *slog.Logger) *Server {
+func NewServer(chat *service.ChatService, identity *service.IdentityService, sessions *service.SessionService, messages *service.MessageService, identityConfig config.IdentityConfig, log *slog.Logger) *Server {
 	gin.SetMode(gin.ReleaseMode)
 	s := &Server{
 		chat:           chat,
 		identity:       identity,
+		sessions:       sessions,
+		messages:       messages,
 		identityConfig: identityConfig,
 		log:            log,
 		engine:         gin.New(), // 不用 gin.Default()，用我们自己的中间件（日志/recover）
@@ -57,8 +61,12 @@ func (s *Server) routes() {
 	// 业务路由。竖切片逐步加入。
 	v1 := s.engine.Group("/api/v1")
 	{
-		v1.POST("/guest", s.guestHandler)            // 创建一个可持久化的 Guest user_id
-		v1.POST("/chat/stream", s.chatStreamHandler) // 流式对话（SSE 逐段下发）
+		v1.POST("/guest", s.guestHandler)
+
+		protected := v1.Group("")
+		protected.Use(authMiddleware(s.identity, s.identityConfig.GuestCookieName, s.log))
+		protected.POST("/sessions", s.createSessionHandler)
+		protected.POST("/chat/stream", s.chatStreamHandler)
 	}
 }
 

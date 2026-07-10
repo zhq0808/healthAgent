@@ -12,7 +12,6 @@ import { AIMessage } from "./components/AIMessage";
 import { MealCard } from "./components/MealCard";
 import {
   createOrResumeGuest,
-  ensureGuestUserID,
   ensureSessionID,
   sendChatStream,
 } from "./api/chat";
@@ -209,10 +208,10 @@ function HealthWorkspace() {
     ]);
 
     try {
-      const userID = await ensureGuestUserID();
-      const sessionID = ensureSessionID();
+      const sessionID = await ensureSessionID();
+	  const clientMessageID = crypto.randomUUID();
       let acc = "";
-      await sendChatStream(userID, sessionID, text, (delta) => {
+      await sendChatStream(sessionID, clientMessageID, text, (delta) => {
         acc += delta;
         setMessages((prev) =>
           prev.map((m) => (m.id === typingId ? { ...m, content: acc } : m))
@@ -395,6 +394,7 @@ export default function App() {
 
     let cancelled = false;
     createOrResumeGuest()
+      .then(() => ensureSessionID())
       .then(() => {
         if (!cancelled) setAuthState("guest");
       })
@@ -410,6 +410,7 @@ export default function App() {
 
   const continueAsGuest = async () => {
     await createOrResumeGuest();
+    await ensureSessionID();
     localStorage.setItem(guestStartedKey, "1");
     setAuthState("guest");
   };

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -16,6 +17,8 @@ const (
 	guestTokenBytes  = 32
 	identityRetries  = 5
 )
+
+var ErrUnauthenticated = errors.New("身份凭证无效")
 
 // IdentityRepository 是身份服务需要的最小持久化能力。
 type IdentityRepository interface {
@@ -47,6 +50,23 @@ func NewIdentityService(repository IdentityRepository, tokenTTL time.Duration) *
 		random:     rand.Reader,
 		now:        time.Now,
 	}
+}
+
+// AuthenticateGuest 只验证已有 Guest 凭证，认证失败时绝不创建新用户。
+func (s *IdentityService) AuthenticateGuest(ctx context.Context, rawToken string) (string, error) {
+	tokenHash, valid := parseGuestToken(rawToken)
+	if !valid {
+		return "", ErrUnauthenticated
+	}
+
+	userID, _, found, err := s.repository.FindActiveGuest(ctx, tokenHash, s.now().UTC())
+	if err != nil {
+		return "", fmt.Errorf("认证 Guest 身份失败: %w", err)
+	}
+	if !found {
+		return "", ErrUnauthenticated
+	}
+	return userID, nil
 }
 
 // EnsureGuest 使用有效设备 token 恢复原 Guest；没有有效 token 时原子创建用户和凭证。

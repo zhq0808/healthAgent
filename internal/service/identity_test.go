@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"testing"
 	"time"
 )
@@ -104,5 +105,28 @@ func TestIdentityServiceEnsureGuestRetriesIdentityCollision(t *testing.T) {
 	}
 	if !identity.Created || repository.createCalls != 2 {
 		t.Fatalf("EnsureGuest() = %+v, create calls = %d, want success after one collision", identity, repository.createCalls)
+	}
+}
+
+func TestIdentityServiceAuthenticateGuest(t *testing.T) {
+	repository := newFakeIdentityRepository()
+	identityService := NewIdentityService(repository, time.Hour)
+	identityService.random = bytes.NewReader(bytes.Repeat([]byte{0x5d}, 64))
+
+	created, err := identityService.EnsureGuest(context.Background(), "")
+	if err != nil {
+		t.Fatalf("EnsureGuest() error = %v", err)
+	}
+
+	userID, err := identityService.AuthenticateGuest(context.Background(), created.Token)
+	if err != nil {
+		t.Fatalf("AuthenticateGuest() error = %v", err)
+	}
+	if userID != created.UserID {
+		t.Fatalf("AuthenticateGuest() userID = %q, want %q", userID, created.UserID)
+	}
+
+	if _, err := identityService.AuthenticateGuest(context.Background(), "invalid"); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("AuthenticateGuest() invalid error = %v, want ErrUnauthenticated", err)
 	}
 }

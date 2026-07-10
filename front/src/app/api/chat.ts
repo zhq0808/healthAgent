@@ -12,11 +12,14 @@ interface GuestResponse {
   created: boolean;
 }
 
-const guestUserIDKey = "health_agent_guest_user_id";
-const sessionIDKey = "health_agent_session_id";
+interface SessionResponse {
+  session_id: string;
+}
+
+const sessionIDKey = "health_agent_session_id_v2";
 
 // createOrResumeGuest 始终请求后端：有效 HttpOnly Cookie 会恢复原 Guest，
-// 没有有效凭证时才原子创建新用户。localStorage 中的 user_id 仅兼容尚未切换鉴权的聊天请求。
+// 没有有效凭证时才原子创建新用户。user_id 仅用于响应诊断，不在前端持久化或授权。
 export async function createOrResumeGuest(): Promise<GuestResponse> {
   const res = await fetch("/api/v1/guest", {
     method: "POST",
@@ -27,33 +30,33 @@ export async function createOrResumeGuest(): Promise<GuestResponse> {
     throw new Error(body.message || "创建试用用户失败");
   }
 
-  localStorage.setItem(guestUserIDKey, body.data.user_id);
+  if (body.data.created) {
+    localStorage.removeItem(sessionIDKey);
+  }
   return body.data;
 }
 
-// ensureGuestUserID 为试用用户申请一个独立 user_id，并在当前浏览器保存它。
-// 这里保存的是用户归属，不是会话线程；后续一个 Guest 可以拥有多个 session_id。
-export async function ensureGuestUserID(): Promise<string> {
-  const existing = localStorage.getItem(guestUserIDKey);
-  if (existing) return existing;
-
-  const guest = await createOrResumeGuest();
-  return guest.user_id;
+async function requestNewSession(): Promise<string> {
+  const res = await fetch("/api/v1/sessions", {
+    method: "POST",
+    credentials: "include",
+  });
+  const body = (await res.json()) as APIResponse & { data?: SessionResponse };
+  if (!res.ok || body.code !== 0 || !body.data?.session_id) {
+    throw new Error(body.message || "创建会话失败");
+  }
+  localStorage.setItem(sessionIDKey, body.data.session_id);
+  return body.data.session_id;
 }
 
-export function ensureSessionID(): string {
+export async function ensureSessionID(): Promise<string> {
   const existing = localStorage.getItem(sessionIDKey);
   if (existing) return existing;
-
-  const sessionID = `session_${crypto.randomUUID()}`;
-  localStorage.setItem(sessionIDKey, sessionID);
-  return sessionID;
+  return requestNewSession();
 }
 
-export function createNewSession(): string {
-  const sessionID = `session_${crypto.randomUUID()}`;
-  localStorage.setItem(sessionIDKey, sessionID);
-  return sessionID;
+export async function createNewSession(): Promise<string> {
+  return requestNewSession();
 }
 
 // 一帧 SSE 解析后的结果。event 为 "message"(默认增量) | "done" | "error"。
@@ -83,18 +86,19 @@ function parseFrame(frame: string): SSEFrame {
 // 历史上下文由后端存储层管理，前端只提交本条消息。
 // 收到 error 帧时抛异常，done 帧或流结束时正常返回。
 export async function sendChatStream(
-  userID: string,
   sessionID: string,
+  clientMessageID: string,
   message: string,
   onDelta: (delta: string) => void,
   signal?: AbortSignal
 ): Promise<void> {
   const res = await fetch("/api/v1/chat/stream", {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      user_id: userID,
       session_id: sessionID,
+      client_message_id: clientMessageID,
       message,
     }),
     signal,
