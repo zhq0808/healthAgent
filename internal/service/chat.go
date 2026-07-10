@@ -19,7 +19,6 @@ type ChatModel interface {
 }
 
 // ChatService 编排聊天上下文和模型调用。
-// 会话归属、历史读取和消息落库将在 repository 接入后继续收敛到这里。
 type ChatService struct {
 	model ChatModel
 }
@@ -32,11 +31,12 @@ func (s *ChatService) Timeout() time.Duration {
 	return s.model.Timeout()
 }
 
-// Stream 组装服务端可信 prompt，并将模型增量传给调用方。
-func (s *ChatService) Stream(ctx context.Context, message string, onDelta func(delta string) error) error {
-	messages := []llm.Message{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: message},
+// Stream 组装 system prompt 和服务端读取的可信会话历史，并流式调用模型。
+func (s *ChatService) Stream(ctx context.Context, history []ConversationMessage, onDelta func(delta string) error) error {
+	messages := make([]llm.Message, 0, len(history)+1)
+	messages = append(messages, llm.Message{Role: "system", Content: systemPrompt})
+	for _, message := range history {
+		messages = append(messages, llm.Message{Role: message.Role, Content: message.Content})
 	}
 	return s.model.Stream(ctx, messages, onDelta)
 }

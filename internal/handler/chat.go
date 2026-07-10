@@ -24,6 +24,8 @@ type chatRequest struct {
 
 var clientMessageIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
+const recentHistoryLimit = 20
+
 // chatStreamHandler 处理一条用户消息，以 SSE 流式把模型回复逐段推给前端。
 // Content-Type: text/event-stream，每收到一段增量就 `data: {json}\n\n` 刷一帧，
 // 结束发一帧 `event: done`。客户端断开时：ctx 取消 + Write 报错双重兑底停止。
@@ -93,6 +95,16 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 		return
 	}
 
+	history, err := s.messages.LoadRecent(c.Request.Context(), userID, req.SessionID, recentHistoryLimit)
+	if err != nil {
+		s.log.Error("读取对话历史失败",
+			"trace_id", TraceIDFromContext(c.Request.Context()),
+			"error", err,
+		)
+		fail(c, http.StatusInternalServerError, CodeInternal, "读取对话历史失败")
+		return
+	}
+
 	// http.Flusher：每写一帧就 flush 到网络，否则会被缓冲攺着一次性发，流式就失意了。
 	// gin.ResponseWriter 本身实现了 http.Flusher，这里断言一下更显意图。
 	flusher, canFlush := c.Writer.(http.Flusher)
@@ -129,12 +141,14 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 	}
 
 	// 把一段增量包成 JSON 再下发，避免文本里的换行破坏 SSE 帧结构。
+	var assistantContent strings.Builder
 	sendDelta := func(delta string) error {
+		assistantContent.WriteString(delta)
 		payload, _ := json.Marshal(map[string]string{"delta": delta})
 		return writeSSE("", string(payload))
 	}
 
-	err = s.chat.Stream(ctx, req.Message, sendDelta)
+	err = s.chat.Stream(ctx, history, sendDelta)
 	if err != nil {
 		// 未配置 Key：不算服务故障，当作一段普通回复流出去，方便本地先跑通链路。
 		if errors.Is(err, llm.ErrNotConfigured) {
@@ -148,6 +162,20 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 		)
 		// 已经开始流（header 无法再改成 500），用 error 事件通知前端。
 		_ = writeSSE("error", `{"message":"对话服务暂时不可用"}`)
+		return
+	}
+
+	if _, err := s.messages.AppendAssistantMessage(c.Request.Context(), service.AppendAssistantMessageRequest{
+		UserID:    userID,
+		SessionID: req.SessionID,
+		Content:   assistantContent.String(),
+		TraceID:   TraceIDFromContext(c.Request.Context()),
+	}); err != nil {
+		s.log.Error("assistant 消息落库失败",
+			"trace_id", TraceIDFromContext(c.Request.Context()),
+			"error", err,
+		)
+		_ = writeSSE("error", `{"message":"回复保存失败，请稍后重试"}`)
 		return
 	}
 

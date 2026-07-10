@@ -9,6 +9,7 @@ import (
 const HealthAgentID = "health-agent"
 
 var ErrClientMessageConflict = errors.New("client_message_id 已用于其他消息内容")
+var ErrEmptyAssistantMessage = errors.New("assistant 消息不能为空")
 
 // AppendUserMessageRequest 是写入一条用户消息所需的可信数据。
 type AppendUserMessageRequest struct {
@@ -37,9 +38,37 @@ type AppendUserMessageResult struct {
 	Created bool
 }
 
+// AppendAssistantMessageRequest 是写入完整模型回复所需的可信数据。
+type AppendAssistantMessageRequest struct {
+	UserID    string
+	SessionID string
+	Content   string
+	TraceID   string
+}
+
+// AssistantMessage 是已持久化的模型回复。
+type AssistantMessage struct {
+	ID        int64
+	UserID    string
+	SessionID string
+	Seq       int
+	Content   string
+	TraceID   string
+	CreatedAt time.Time
+}
+
+// ConversationMessage 是可进入对话上下文的已完成消息。
+type ConversationMessage struct {
+	Seq     int
+	Role    string
+	Content string
+}
+
 // MessageRepository 是消息服务当前需要的最小持久化能力。
 type MessageRepository interface {
 	AppendUserMessage(ctx context.Context, request AppendUserMessageRequest) (AppendUserMessageResult, error)
+	AppendAssistantMessage(ctx context.Context, request AppendAssistantMessageRequest) (AssistantMessage, error)
+	LoadRecent(ctx context.Context, userID, sessionID string, limit int) ([]ConversationMessage, error)
 }
 
 // MessageService 编排消息持久化和幂等语义。
@@ -60,4 +89,19 @@ func (s *MessageService) AppendUserMessage(ctx context.Context, request AppendUs
 		return AppendUserMessageResult{}, ErrClientMessageConflict
 	}
 	return result, nil
+}
+
+func (s *MessageService) AppendAssistantMessage(ctx context.Context, request AppendAssistantMessageRequest) (AssistantMessage, error) {
+	if request.Content == "" {
+		return AssistantMessage{}, ErrEmptyAssistantMessage
+	}
+	return s.repository.AppendAssistantMessage(ctx, request)
+}
+
+// LoadRecent 返回当前用户会话中最近的有效消息，并保持会话内顺序。
+func (s *MessageService) LoadRecent(ctx context.Context, userID, sessionID string, limit int) ([]ConversationMessage, error) {
+	if limit <= 0 {
+		return []ConversationMessage{}, nil
+	}
+	return s.repository.LoadRecent(ctx, userID, sessionID, limit)
 }
