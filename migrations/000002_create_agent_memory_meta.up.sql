@@ -1,8 +1,8 @@
 -- 长期记忆元数据表（提炼后的事实/画像，长期保留）
 CREATE TABLE agent_memory_meta (
     memory_id        VARCHAR(64)  PRIMARY KEY,
-    session_id       VARCHAR(64)  NOT NULL,           -- 匿名期归属，与 episodic 一致
-    user_id          VARCHAR(64),                     -- 登录后回填
+    session_id       VARCHAR(64)  NOT NULL,           -- 会话线程，与 episodic 一致
+    user_id          VARCHAR(64)  NOT NULL,           -- 数据归属用户
     agent_id         VARCHAR(64)  NOT NULL,
     category         VARCHAR(30)  NOT NULL,           -- user_preference/factual/bio
     entity_key       VARCHAR(100),                    -- 关联实体关键词，方便传统索引提取
@@ -34,8 +34,8 @@ CREATE TRIGGER trg_mem_updated_at
 
 COMMENT ON TABLE  agent_memory_meta IS '长期记忆元数据表（提炼后的事实/画像）';
 COMMENT ON COLUMN agent_memory_meta.memory_id        IS '记忆唯一ID';
-COMMENT ON COLUMN agent_memory_meta.session_id       IS '会话/匿名归属ID，与 episodic 一致';
-COMMENT ON COLUMN agent_memory_meta.user_id          IS '用户ID，匿名期为NULL，登录后回填';
+COMMENT ON COLUMN agent_memory_meta.session_id       IS '会话线程ID，与 episodic 一致';
+COMMENT ON COLUMN agent_memory_meta.user_id          IS '数据归属用户ID';
 COMMENT ON COLUMN agent_memory_meta.category         IS '分类: user_preference/factual/bio';
 COMMENT ON COLUMN agent_memory_meta.entity_key       IS '关联实体关键词，方便传统索引提取';
 COMMENT ON COLUMN agent_memory_meta.memory_value     IS '提炼后的记忆内容';

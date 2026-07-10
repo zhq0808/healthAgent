@@ -17,6 +17,7 @@ import (
 	"healthAgent/internal/handler"
 	"healthAgent/internal/llm"
 	"healthAgent/internal/logger"
+	"healthAgent/internal/service"
 	"healthAgent/internal/store"
 )
 
@@ -82,8 +83,11 @@ func run() error {
 	// 优雅关闭的等待时间必须 >= 它，否则在途慢请求会被提前掐断，见下方 shutdownGrace。
 	const writeTimeout = 60 * time.Second
 
-	// 4. 构建 HTTP Server（当前只做基础对话，直接依赖 LLM 客户端）
-	srvHandler := handler.NewServer(client, log).Handler()
+	// 4. 在 composition root 组装业务服务；HTTP handler 只依赖 service。
+	chatService := service.NewChatService(client)
+	identityRepository := store.NewPostgresIdentityRepository(db)
+	identityService := service.NewIdentityService(identityRepository, time.Duration(cfg.Identity.GuestTokenTTLHours)*time.Hour)
+	srvHandler := handler.NewServer(chatService, identityService, cfg.Identity, log).Handler()
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTP.Port,
 		Handler:           srvHandler,

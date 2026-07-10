@@ -10,7 +10,13 @@ import { InputDock } from "./components/InputDock";
 import { UserMessage } from "./components/UserMessage";
 import { AIMessage } from "./components/AIMessage";
 import { MealCard } from "./components/MealCard";
-import { sendChatStream, ChatMessage } from "./api/chat";
+import {
+  createOrResumeGuest,
+  ensureGuestUserID,
+  ensureSessionID,
+  sendChatStream,
+} from "./api/chat";
+import { AuthPage } from "./pages/AuthPage";
 
 interface Message {
   id: string;
@@ -92,7 +98,7 @@ const INITIAL_TAGS: StatusTagDef[] = [
   },
 ];
 
-export default function App() {
+function HealthWorkspace() {
   const [tags, setTags] = useState<StatusTagDef[]>(INITIAL_TAGS);
   const [actions, setActions] = useState<ActionItem[]>(initialActions);
   const [messages, setMessages] = useState<Message[]>([
@@ -196,18 +202,6 @@ export default function App() {
     }
 
     // 其余自由对话走真实 chat 接口。先插入占位气泡，返回后原地替换。
-    // 从现有消息里抽出文本类（user/ai）作为多轮上下文（不含卡片等非文本消息）。
-    const history: ChatMessage[] = messages
-      .filter(
-        (m) =>
-          (m.type === "user" || m.type === "ai") &&
-          typeof m.content === "string"
-      )
-      .map((m) => ({
-        role: m.type === "user" ? "user" : "assistant",
-        content: m.content as string,
-      }));
-
     const typingId = Date.now().toString() + "-typing";
     setMessages((prev) => [
       ...prev,
@@ -215,8 +209,10 @@ export default function App() {
     ]);
 
     try {
+      const userID = await ensureGuestUserID();
+      const sessionID = ensureSessionID();
       let acc = "";
-      await sendChatStream(text, history, (delta) => {
+      await sendChatStream(userID, sessionID, text, (delta) => {
         acc += delta;
         setMessages((prev) =>
           prev.map((m) => (m.id === typingId ? { ...m, content: acc } : m))
@@ -386,4 +382,49 @@ export default function App() {
       />
     </div>
   );
+}
+
+export default function App() {
+  const guestStartedKey = "health_agent_guest_started";
+  const [authState, setAuthState] = useState<"auth" | "restoring" | "guest">(() =>
+    localStorage.getItem(guestStartedKey) === "1" ? "restoring" : "auth"
+  );
+
+  useEffect(() => {
+    if (authState !== "restoring") return;
+
+    let cancelled = false;
+    createOrResumeGuest()
+      .then(() => {
+        if (!cancelled) setAuthState("guest");
+      })
+      .catch(() => {
+        localStorage.removeItem(guestStartedKey);
+        if (!cancelled) setAuthState("auth");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authState]);
+
+  const continueAsGuest = async () => {
+    await createOrResumeGuest();
+    localStorage.setItem(guestStartedKey, "1");
+    setAuthState("guest");
+  };
+
+  if (authState === "guest") {
+    return <HealthWorkspace />;
+  }
+
+  if (authState === "restoring") {
+    return (
+      <main className="flex min-h-dvh items-center justify-center bg-[#F4F2ED] text-[#2E5E3E]">
+        <p className="text-sm font-medium">正在恢复访客身份...</p>
+      </main>
+    );
+  }
+
+  return <AuthPage onContinueAsGuest={continueAsGuest} />;
 }

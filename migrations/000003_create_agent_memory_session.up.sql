@@ -1,7 +1,7 @@
 -- 会话元信息 + 滚动摘要表（一个会话一行，会话的"目录页"）
 CREATE TABLE agent_memory_session (
     session_id      VARCHAR(64)  PRIMARY KEY,
-    user_id         VARCHAR(64),                     -- 匿名期为 NULL，登录后回填
+    user_id         VARCHAR(64)  NOT NULL,            -- 数据归属用户
     title           VARCHAR(255),                    -- 会话标题（自动生成或用户自定义）
     status          VARCHAR(20)  NOT NULL DEFAULT 'active', -- active/archived/ended
 
@@ -31,7 +31,7 @@ CREATE TRIGGER trg_sess_updated_at
 
 COMMENT ON TABLE  agent_memory_session IS '会话元信息 + 滚动摘要表';
 COMMENT ON COLUMN agent_memory_session.session_id      IS '会话ID';
-COMMENT ON COLUMN agent_memory_session.user_id         IS '用户ID，匿名期为NULL，登录后回填';
+COMMENT ON COLUMN agent_memory_session.user_id         IS '数据归属用户ID';
 COMMENT ON COLUMN agent_memory_session.title           IS '会话标题（自动生成或用户自定义）';
 COMMENT ON COLUMN agent_memory_session.status          IS '状态: active/archived/ended';
 COMMENT ON COLUMN agent_memory_session.summary         IS '滚动摘要（滑出窗口的老对话压缩）';

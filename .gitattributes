@@ -1,0 +1,33 @@
+# Normalize text in Git and keep project source files LF on every platform.
+* text=auto
+
+*.go     text eol=lf
+*.mod    text eol=lf
+*.sum    text eol=lf
+*.ts     text eol=lf
+*.tsx    text eol=lf
+*.js     text eol=lf
+*.jsx    text eol=lf
+*.css    text eol=lf
+*.html   text eol=lf
+*.json   text eol=lf
+*.yaml   text eol=lf
+*.yml    text eol=lf
+*.sql    text eol=lf
+*.md     text eol=lf
+*.sh     text eol=lf
+
+# Native Windows scripts use CRLF.
+*.bat    text eol=crlf
+*.cmd    text eol=crlf
+*.ps1    text eol=crlf
+
+# Binary assets must never be line-ending normalized.
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.webp   binary
+*.ico    binary
+*.woff   binary
+*.woff2  binary

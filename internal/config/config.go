@@ -9,17 +9,25 @@ import (
 
 // Config 是应用的全部配置
 type Config struct {
-	HTTP     HTTPConfig   `yaml:"http"     env-prefix:"HTTP_"`
-	DeepSeek LLMConfig    `yaml:"deepseek" env-prefix:"DEEPSEEK_"`
-	OpenAI   OpenAIConfig `yaml:"openai"   env-prefix:"OPENAI_"`
+	HTTP     HTTPConfig     `yaml:"http"     env-prefix:"HTTP_"`
+	Identity IdentityConfig `yaml:"identity" env-prefix:"IDENTITY_"`
+	DeepSeek LLMConfig      `yaml:"deepseek" env-prefix:"DEEPSEEK_"`
+	OpenAI   OpenAIConfig   `yaml:"openai"   env-prefix:"OPENAI_"`
 	Postgres PostgresConfig `yaml:"postgres" env-prefix:"POSTGRES_"`
-	Redis    RedisConfig  `yaml:"redis"    env-prefix:"REDIS_"`
-	Log      LogConfig    `yaml:"log"      env-prefix:"LOG_"`
+	Redis    RedisConfig    `yaml:"redis"    env-prefix:"REDIS_"`
+	Log      LogConfig      `yaml:"log"      env-prefix:"LOG_"`
 }
 
 // HTTPConfig 保持不变
 type HTTPConfig struct {
 	Port string `yaml:"port" env:"PORT" env-default:"8091"`
+}
+
+// IdentityConfig 控制 Guest 设备凭证和 Cookie 的生命周期。
+type IdentityConfig struct {
+	GuestCookieName    string `yaml:"guest_cookie_name"     env:"GUEST_COOKIE_NAME"      env-default:"health_guest"`
+	GuestTokenTTLHours int    `yaml:"guest_token_ttl_hours" env:"GUEST_TOKEN_TTL_HOURS" env-default:"8760"`
+	CookieSecure       bool   `yaml:"cookie_secure"         env:"COOKIE_SECURE"         env-default:"false"`
 }
 
 // LLMConfig 目前专门给 DeepSeek 用

@@ -1,38 +1,59 @@
 // chat.ts 封装与后端对话接口的通信。
 // 后端统一响应格式：{ code, message, data, trace_id }，code === 0 表示成功。
 
-interface ChatResponse {
+interface APIResponse {
   code: number;
   message: string;
-  data?: { reply: string };
   trace_id?: string;
 }
 
-// ChatMessage 是一轮历史对话。role 与后端/OpenAI 协议对齐：user 或 assistant。
-export interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
+interface GuestResponse {
+  user_id: string;
+  created: boolean;
 }
 
-// sendChat 向 /api/v1/chat 发送一条消息，返回 AI 回复文本。
-// 走 Vite 的 dev proxy 透传到 Go 服务(8091)，前端直接用相对路径免跨域。
-export async function sendChat(
-  message: string,
-  signal?: AbortSignal
-): Promise<string> {
-  const res = await fetch("/api/v1/chat", {
+const guestUserIDKey = "health_agent_guest_user_id";
+const sessionIDKey = "health_agent_session_id";
+
+// createOrResumeGuest 始终请求后端：有效 HttpOnly Cookie 会恢复原 Guest，
+// 没有有效凭证时才原子创建新用户。localStorage 中的 user_id 仅兼容尚未切换鉴权的聊天请求。
+export async function createOrResumeGuest(): Promise<GuestResponse> {
+  const res = await fetch("/api/v1/guest", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
-    signal,
+    credentials: "include",
   });
-
-  const body = (await res.json()) as ChatResponse;
-
-  if (body.code !== 0 || !body.data) {
-    throw new Error(body.message || "对话失败");
+  const body = (await res.json()) as APIResponse & { data?: GuestResponse };
+  if (!res.ok || body.code !== 0 || !body.data?.user_id) {
+    throw new Error(body.message || "创建试用用户失败");
   }
-  return body.data.reply;
+
+  localStorage.setItem(guestUserIDKey, body.data.user_id);
+  return body.data;
+}
+
+// ensureGuestUserID 为试用用户申请一个独立 user_id，并在当前浏览器保存它。
+// 这里保存的是用户归属，不是会话线程；后续一个 Guest 可以拥有多个 session_id。
+export async function ensureGuestUserID(): Promise<string> {
+  const existing = localStorage.getItem(guestUserIDKey);
+  if (existing) return existing;
+
+  const guest = await createOrResumeGuest();
+  return guest.user_id;
+}
+
+export function ensureSessionID(): string {
+  const existing = localStorage.getItem(sessionIDKey);
+  if (existing) return existing;
+
+  const sessionID = `session_${crypto.randomUUID()}`;
+  localStorage.setItem(sessionIDKey, sessionID);
+  return sessionID;
+}
+
+export function createNewSession(): string {
+  const sessionID = `session_${crypto.randomUUID()}`;
+  localStorage.setItem(sessionIDKey, sessionID);
+  return sessionID;
 }
 
 // 一帧 SSE 解析后的结果。event 为 "message"(默认增量) | "done" | "error"。
@@ -58,19 +79,24 @@ function parseFrame(frame: string): SSEFrame {
   }
 }
 
-// sendChatStream 以 SSE 流式请求 /api/v1/chat/stream，每收到一段增量就回调 onDelta，
-// 用于"边收边渲染"。history 是之前若干轮对话（不含本条），带上以支持多轮上下文。
+// sendChatStream 以 SSE 流式请求 /api/v1/chat/stream，每收到一段增量就回调 onDelta。
+// 历史上下文由后端存储层管理，前端只提交本条消息。
 // 收到 error 帧时抛异常，done 帧或流结束时正常返回。
 export async function sendChatStream(
+  userID: string,
+  sessionID: string,
   message: string,
-  history: ChatMessage[],
   onDelta: (delta: string) => void,
   signal?: AbortSignal
 ): Promise<void> {
   const res = await fetch("/api/v1/chat/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, history }),
+    body: JSON.stringify({
+      user_id: userID,
+      session_id: sessionID,
+      message,
+    }),
     signal,
   });
 

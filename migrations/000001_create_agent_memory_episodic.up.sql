@@ -3,7 +3,7 @@ CREATE TABLE agent_memory_episodic (
     id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 
     session_id    VARCHAR(64)  NOT NULL,
-    user_id       VARCHAR(64),                          -- 匿名期为 NULL，登录后回填
+    user_id       VARCHAR(64)  NOT NULL,                -- 数据归属用户
     agent_id      VARCHAR(64)  NOT NULL,
     seq           INTEGER      NOT NULL,
     parent_id     BIGINT,                               -- 消息树父节点，支持 regenerate 分支
@@ -41,7 +41,7 @@ CREATE INDEX idx_ame_parent     ON agent_memory_episodic (parent_id);
 CREATE INDEX idx_ame_sync_pending ON agent_memory_episodic (sync_status)
     WHERE sync_status <> 1;
 
--- updated_at 自动维护（PG 没有 MySQL 的 ON UPDATE，用触发器）
+-- updated_at 自动维护（PostgreSQL 通过触发器实现）
 CREATE OR REPLACE FUNCTION set_updated_at() RETURNS trigger AS $$
 BEGIN
     NEW.updated_at = now();
@@ -56,7 +56,7 @@ CREATE TRIGGER trg_ame_updated_at
 -- 字段注释
 COMMENT ON TABLE  agent_memory_episodic IS '智能体情景记忆流水表';
 COMMENT ON COLUMN agent_memory_episodic.session_id  IS '会话ID';
-COMMENT ON COLUMN agent_memory_episodic.user_id     IS '用户ID，匿名期为NULL，登录后回填';
+COMMENT ON COLUMN agent_memory_episodic.user_id     IS '数据归属用户ID';
 COMMENT ON COLUMN agent_memory_episodic.agent_id    IS '处理该消息的智能体ID';
 COMMENT ON COLUMN agent_memory_episodic.seq         IS '会话内消息序号，配合uk防并发串号';
 COMMENT ON COLUMN agent_memory_episodic.parent_id   IS '消息树父节点，支持regenerate分支';
