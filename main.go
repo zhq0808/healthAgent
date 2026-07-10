@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"embed"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -18,6 +19,11 @@ import (
 	"healthAgent/internal/logger"
 	"healthAgent/internal/store"
 )
+
+// migrationsFS 把 migrations/ 下的 SQL 打进二进制，部署时无需额外携带脚本。
+//
+//go:embed migrations/*.sql
+var migrationsFS embed.FS
 
 func main() {
 	if err := run(); err != nil {
@@ -55,10 +61,16 @@ func run() error {
 	defer db.Close()
 	log.Info("PostgreSQL 连接就绪", "addr", cfg.Postgres.Host+":"+strconv.Itoa(cfg.Postgres.Port), "db", cfg.Postgres.DBName)
 
-	// 3.2 初始化 Redis（缓热上下文）。连不上不阻断启动，运行时降级为直读 MySQL。
+	// 3.1b 执行数据库迁移（golang-migrate）。结构不到位不允许启动——与 source of truth fail-fast 一致。
+	if err := store.RunMigrations(cfg.Postgres, migrationsFS, "migrations"); err != nil {
+		return err
+	}
+	log.Info("数据库迁移已应用至最新版本")
+
+	// 3.2 初始化 Redis（缓热上下文）。连不上不阻断启动，运行时降级为直读 PostgreSQL。
 	rdb, err := store.NewRedis(cfg.Redis)
 	if err != nil {
-		log.Warn("Redis 连接失败，将降级为直读 MySQL", "error", err)
+		log.Warn("Redis 连接失败，将降级为直读 PostgreSQL", "error", err)
 		rdb = nil
 	} else {
 		defer rdb.Close()
