@@ -84,7 +84,7 @@ func run() error {
 	const writeTimeout = 60 * time.Second
 
 	// 4. 在 composition root 组装业务服务；HTTP handler 只依赖 service。
-	chatService := service.NewChatService(client)
+	chatService := service.NewChatService(client, cfg.Chat.MaxReplyChars)
 	identityRepository := store.NewPostgresIdentityRepository(db)
 	identityService := service.NewIdentityService(identityRepository, time.Duration(cfg.Identity.GuestTokenTTLHours)*time.Hour)
 	sessionRepository := store.NewPostgresSessionRepository(db)

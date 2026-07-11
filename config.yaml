@@ -8,6 +8,10 @@ identity:
   guest_token_ttl_hours: 8760  # 1 年；过期或清除 Cookie 后无法恢复未绑定 Guest
   cookie_secure: false         # 本地 HTTP；生产环境必须覆盖为 true
 
+# 聊天业务层配置（不是大模型传输层配置，那部分在 deepseek/openai 下面）。
+chat:
+  max_reply_chars: 4000  # 单条 assistant 回复累积上限，超过截断收尾，防止异常输出撑爆内存/数据库行
+
 deepseek:
   base_url: "https://api.deepseek.com"
   model: "deepseek-chat"

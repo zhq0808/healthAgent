@@ -11,6 +11,7 @@ import (
 type Config struct {
 	HTTP     HTTPConfig     `yaml:"http"     env-prefix:"HTTP_"`
 	Identity IdentityConfig `yaml:"identity" env-prefix:"IDENTITY_"`
+	Chat     ChatConfig     `yaml:"chat"     env-prefix:"CHAT_"`
 	DeepSeek LLMConfig      `yaml:"deepseek" env-prefix:"DEEPSEEK_"`
 	OpenAI   OpenAIConfig   `yaml:"openai"   env-prefix:"OPENAI_"`
 	Postgres PostgresConfig `yaml:"postgres" env-prefix:"POSTGRES_"`
@@ -36,6 +37,13 @@ type LLMConfig struct {
 	BaseURL        string `yaml:"base_url" env:"BASE_URL" env-default:"https://api.deepseek.com"`
 	Model          string `yaml:"model"    env:"MODEL"    env-default:"deepseek-chat"`
 	TimeoutSeconds int    `yaml:"timeout"  env:"TIMEOUT"  env-default:"30"`
+}
+
+// ChatConfig 控制聊天业务层（不是 LLM 传输层）的行为。
+type ChatConfig struct {
+	// MaxReplyChars 是单条 assistant 回复累积的最大字符数上限，防止模型异常时（例如陷入重复输出）
+	// 无限占用内存并写入一条超大的数据库行。<=0 时回退为 service.DefaultMaxReplyChars。
+	MaxReplyChars int `yaml:"max_reply_chars" env:"MAX_REPLY_CHARS" env-default:"4000"`
 }
 
 // OpenAIConfig 是你后续新增的 OpenAI 配置

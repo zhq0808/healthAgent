@@ -192,14 +192,13 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 	}
 
 	// 把一段增量包成 JSON 再下发，避免文本里的换行破坏 SSE 帧结构。
-	var assistantContent strings.Builder
+	// 这里只做协议转换，不做任何累积/截断判断——那些属于业务规则，由 ChatService.Stream 统一处理。
 	sendDelta := func(delta string) error {
-		assistantContent.WriteString(delta)
 		payload, _ := json.Marshal(map[string]string{"delta": delta})
 		return writeSSE("", string(payload))
 	}
 
-	err = s.chat.Stream(ctx, history, sendDelta)
+	assistantContent, err := s.chat.Stream(ctx, history, sendDelta)
 	if err != nil {
 		// 未配置 Key：不算服务故障，当作一段普通回复流出去，方便本地先跑通链路。
 		if errors.Is(err, llm.ErrNotConfigured) {
@@ -220,7 +219,7 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 	if _, err := s.messages.AppendAssistantMessage(c.Request.Context(), service.AppendAssistantMessageRequest{
 		UserID:    userID,
 		SessionID: req.SessionID,
-		Content:   assistantContent.String(),
+		Content:   assistantContent,
 		TraceID:   TraceIDFromContext(c.Request.Context()),
 	}); err != nil {
 		s.log.Error("assistant 消息落库失败",

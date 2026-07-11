@@ -66,8 +66,9 @@ func (r *handlerTurnLeaseRepository) Release(_ context.Context, request service.
 }
 
 type handlerChatModel struct {
-	calls    int
-	messages []llm.Message
+	calls     int
+	messages  []llm.Message
+	streamErr error
 }
 
 func (m *handlerChatModel) Timeout() time.Duration {
@@ -77,6 +78,9 @@ func (m *handlerChatModel) Timeout() time.Duration {
 func (m *handlerChatModel) Stream(_ context.Context, messages []llm.Message, onDelta func(string) error) error {
 	m.calls++
 	m.messages = messages
+	if m.streamErr != nil {
+		return m.streamErr
+	}
 	return onDelta("reply")
 }
 
@@ -248,6 +252,39 @@ func TestChatStreamHandlerReleasesLeaseAsCompletedOnNormalSuccess(t *testing.T) 
 	}
 }
 
+// LLM 调用失败、请求超时、客户端断开在代码里走的是同一条错误分支（Stream 返回一个非 ErrNotConfigured
+// 的 error），这里用“LLM 直接报错”代表这一类场景，验证租约会被释放为 failed 且不会错误地继给 assistant 落库。
+func TestChatStreamHandlerReleasesLeaseAsFailedWhenModelStreamFails(t *testing.T) {
+	messageRepository := &handlerMessageRepository{
+		result: service.AppendUserMessageResult{
+			Message: service.UserMessage{ID: 42},
+			Created: true,
+		},
+	}
+	chatModel := &handlerChatModel{streamErr: errors.New("upstream timeout")}
+	turnLeaseRepository := &handlerTurnLeaseRepository{acquireResult: service.AcquireTurnLeaseResult{Acquired: true}}
+	server := newChatHandlerTestServerWithLease(messageRepository, chatModel, turnLeaseRepository)
+
+	recorder := performChatRequest(server, `{
+		"session_id":"session_0123456789abcdef0123456789abcdef",
+		"client_message_id":"550e8400-e29b-41d4-a716-446655440000",
+		"message":"hello"
+	}`)
+
+	if !strings.Contains(recorder.Body.String(), "event: error") {
+		t.Fatalf("body = %q, want error event", recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "event: done") {
+		t.Fatalf("body = %q, must not contain done event", recorder.Body.String())
+	}
+	if messageRepository.assistantCalls != 0 {
+		t.Fatalf("assistant calls = %d, want 0 because the model never produced a reply", messageRepository.assistantCalls)
+	}
+	if turnLeaseRepository.releaseCalls != 1 || turnLeaseRepository.lastRelease.Status != service.TurnLeaseFailed {
+		t.Fatalf("release calls=%d status=%v, want 1 release with failed status", turnLeaseRepository.releaseCalls, turnLeaseRepository.lastRelease.Status)
+	}
+}
+
 func newChatHandlerTestServer(messageRepository service.MessageRepository, chatModel service.ChatModel) *Server {
 	return newChatHandlerTestServerWithLease(messageRepository, chatModel, &handlerTurnLeaseRepository{
 		acquireResult: service.AcquireTurnLeaseResult{Acquired: true},
@@ -259,7 +296,7 @@ func newChatHandlerTestServerWithLease(messageRepository service.MessageReposito
 		"session_0123456789abcdef0123456789abcdef": "usr_owner",
 	}}
 	return &Server{
-		chat:       service.NewChatService(chatModel),
+		chat:       service.NewChatService(chatModel, service.DefaultMaxReplyChars),
 		sessions:   service.NewSessionService(sessionRepository),
 		messages:   service.NewMessageService(messageRepository),
 		turnLeases: service.NewTurnLeaseService(turnLeaseRepository),
