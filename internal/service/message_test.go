@@ -10,6 +10,9 @@ type fakeMessageRepository struct {
 	result          AppendUserMessageResult
 	assistantResult AssistantMessage
 	history         []ConversationMessage
+	reply           AssistantMessage
+	replyFound      bool
+	lastFindReplyID int64
 	err             error
 }
 
@@ -23,6 +26,11 @@ func (r *fakeMessageRepository) AppendAssistantMessage(_ context.Context, _ Appe
 
 func (r *fakeMessageRepository) LoadRecent(_ context.Context, _, _ string, _ int) ([]ConversationMessage, error) {
 	return r.history, r.err
+}
+
+func (r *fakeMessageRepository) FindAssistantReplyByID(_ context.Context, _, _ string, messageID int64) (AssistantMessage, bool, error) {
+	r.lastFindReplyID = messageID
+	return r.reply, r.replyFound, r.err
 }
 
 func TestMessageServiceReturnsIdempotentExistingMessage(t *testing.T) {
@@ -72,5 +80,33 @@ func TestMessageServiceRejectsEmptyAssistantMessage(t *testing.T) {
 	_, err := messageService.AppendAssistantMessage(t.Context(), AppendAssistantMessageRequest{})
 	if !errors.Is(err, ErrEmptyAssistantMessage) {
 		t.Fatalf("AppendAssistantMessage() error = %v, want ErrEmptyAssistantMessage", err)
+	}
+}
+
+func TestMessageServiceFindReplyForTurnQueriesPersistedResultID(t *testing.T) {
+	repository := &fakeMessageRepository{reply: AssistantMessage{Content: "answer"}, replyFound: true}
+	messageService := NewMessageService(repository)
+
+	reply, found, err := messageService.FindReplyForTurn(t.Context(), "usr_owner", "session_owner", 99)
+	if err != nil {
+		t.Fatalf("FindReplyForTurn() error = %v", err)
+	}
+	if !found || reply.Content != "answer" {
+		t.Fatalf("FindReplyForTurn() = %+v, %v, want found answer", reply, found)
+	}
+	if repository.lastFindReplyID != 99 {
+		t.Fatalf("queried message id = %d, want 99", repository.lastFindReplyID)
+	}
+}
+
+func TestMessageServiceFindReplyForTurnReportsNotFound(t *testing.T) {
+	messageService := NewMessageService(&fakeMessageRepository{replyFound: false})
+
+	_, found, err := messageService.FindReplyForTurn(t.Context(), "usr_owner", "session_owner", 5)
+	if err != nil {
+		t.Fatalf("FindReplyForTurn() error = %v", err)
+	}
+	if found {
+		t.Fatal("FindReplyForTurn() found = true, want false")
 	}
 }

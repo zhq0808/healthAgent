@@ -42,6 +42,7 @@ type AppendUserMessageResult struct {
 type AppendAssistantMessageRequest struct {
 	UserID    string
 	SessionID string
+	ParentID  int64
 	Content   string
 	TraceID   string
 }
@@ -69,6 +70,9 @@ type MessageRepository interface {
 	AppendUserMessage(ctx context.Context, request AppendUserMessageRequest) (AppendUserMessageResult, error)
 	AppendAssistantMessage(ctx context.Context, request AppendAssistantMessageRequest) (AssistantMessage, error)
 	LoadRecent(ctx context.Context, userID, sessionID string, limit int) ([]ConversationMessage, error)
+	// FindAssistantReplyByID 按 turn 保存的结果消息 ID 查已完成的 assistant 回复。
+	// 找不到时返回 (zero, false, nil)，不算错误。
+	FindAssistantReplyByID(ctx context.Context, userID, sessionID string, messageID int64) (AssistantMessage, bool, error)
 }
 
 // MessageService 编排消息持久化和幂等语义。
@@ -104,4 +108,12 @@ func (s *MessageService) LoadRecent(ctx context.Context, userID, sessionID strin
 		return []ConversationMessage{}, nil
 	}
 	return s.repository.LoadRecent(ctx, userID, sessionID, limit)
+}
+
+// FindReplyForTurn 按 completed turn 持久化的 result_message_id 原样恢复结果。
+func (s *MessageService) FindReplyForTurn(ctx context.Context, userID, sessionID string, resultMessageID int64) (AssistantMessage, bool, error) {
+	if resultMessageID <= 0 {
+		return AssistantMessage{}, false, nil
+	}
+	return s.repository.FindAssistantReplyByID(ctx, userID, sessionID, resultMessageID)
 }

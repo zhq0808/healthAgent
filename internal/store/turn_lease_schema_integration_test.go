@@ -76,9 +76,9 @@ func TestAgentTurnLeaseSchemaEnforcesSingleActiveTurnPerSession(t *testing.T) {
 		t.Fatalf("second active lease insert error = %v, want unique violation", err)
 	}
 
-	// 3. 把首条租约标记为 completed 后，同一 Session 才能再次获取新的 active 租约。
+	// 3. 把首条租约标记为 failed 后，同一 Session 才能再次获取新的 active 租约。
 	if _, err := pool.Exec(ctx, `
-		UPDATE agent_turn_lease SET status = 'completed'
+		UPDATE agent_turn_lease SET status = 'failed'
 		WHERE session_id = $1 AND client_message_id = $2`, sessionID, firstMessageID); err != nil {
 		t.Fatalf("release first lease: %v", err)
 	}
@@ -114,11 +114,11 @@ func TestAgentTurnLeaseSchemaEnforcesSingleActiveTurnPerSession(t *testing.T) {
 	}
 
 	// 7. (session_id, user_id) 必须真实存在于 agent_memory_session，防止租约挂到别人的会话上。
-	//    用 completed 状态插入，避免和已存在的 active 租约先撞上 uk_turn_lease_active_session，
+	//    用 failed 状态插入，避免和已存在的 active 租约先撞上 uk_turn_lease_active_session，
 	//    确保这里验证到的确实是外键约束而不是别的唯一约束。
 	_, err = pool.Exec(ctx, `
 		INSERT INTO agent_turn_lease (session_id, user_id, client_message_id, status, lease_expires_at)
-		VALUES ($1, $2, $3, 'completed', $4)`, sessionID, otherUser, "00000000-0000-4000-8000-000000000084", future)
+		VALUES ($1, $2, $3, 'failed', $4)`, sessionID, otherUser, "00000000-0000-4000-8000-000000000084", future)
 	if !isForeignKeyViolationForTest(err) {
 		t.Fatalf("mismatched owner insert error = %v, want foreign key violation", err)
 	}
@@ -151,6 +151,9 @@ func cleanupTurnLeaseSchemaTest(t *testing.T, pool *pgxpool.Pool, userIDs ...str
 	for _, userID := range userIDs {
 		if _, err := pool.Exec(ctx, `DELETE FROM agent_turn_lease WHERE user_id = $1`, userID); err != nil {
 			t.Fatalf("cleanup turn leases: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM agent_memory_episodic WHERE user_id = $1`, userID); err != nil {
+			t.Fatalf("cleanup messages: %v", err)
 		}
 		if _, err := pool.Exec(ctx, `DELETE FROM agent_memory_session WHERE user_id = $1`, userID); err != nil {
 			t.Fatalf("cleanup sessions: %v", err)

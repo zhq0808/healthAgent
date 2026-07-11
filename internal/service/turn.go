@@ -9,6 +9,12 @@ import (
 // ErrTurnLeaseConflict 表示该 Session 已有另一个未过期的 active turn，本次获取必须被拒绝（对应未来的 409）。
 var ErrTurnLeaseConflict = errors.New("session 已有进行中的 turn")
 
+// ErrTurnInProgress 表示同一 client_message_id 对应的 turn 仍在处理中，重复请求不能成为新的执行者。
+var ErrTurnInProgress = errors.New("turn 仍在处理中")
+
+// ErrTurnLeaseLost 表示当前执行者的 attempt 已过期或已被其他请求接管，不能再写入结果。
+var ErrTurnLeaseLost = errors.New("turn 租约已失效")
+
 // TurnLeaseStatus 是 turn 租约的状态取值，对应数据库 agent_turn_lease.status。
 type TurnLeaseStatus string
 
@@ -29,6 +35,9 @@ type TurnLease struct {
 	UserID          string
 	ClientMessageID string
 	Status          TurnLeaseStatus
+	AttemptNo       int64
+	UserMessageID   int64
+	ResultMessageID int64
 	LeaseExpiresAt  time.Time
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
@@ -39,6 +48,8 @@ type AcquireTurnLeaseRequest struct {
 	UserID          string
 	SessionID       string
 	ClientMessageID string
+	Content         string
+	TraceID         string
 	LeaseDuration   time.Duration
 }
 
@@ -48,8 +59,20 @@ type AcquireTurnLeaseRequest struct {
 // Acquired=false 且 err=nil 表示命中了同一 client_message_id 的历史终态记录（completed/failed）——
 // 不是错误，而是"这条用户消息之前已经处理完了"，具体怎么恢复结果留给后续的结果恢复协议处理。
 type AcquireTurnLeaseResult struct {
-	Lease    TurnLease
-	Acquired bool
+	Lease       TurnLease
+	UserMessage UserMessage
+	Acquired    bool
+}
+
+// CompleteTurnRequest 把当前 attempt 的 assistant 结果落库并将 turn 原子推进到 completed。
+type CompleteTurnRequest struct {
+	UserID          string
+	SessionID       string
+	ClientMessageID string
+	AttemptNo       int64
+	UserMessageID   int64
+	Content         string
+	TraceID         string
 }
 
 // ReleaseTurnLeaseRequest 是释放（结束）一个 turn 租约所需的信息。
@@ -57,12 +80,14 @@ type ReleaseTurnLeaseRequest struct {
 	UserID          string
 	SessionID       string
 	ClientMessageID string
+	AttemptNo       int64
 	Status          TurnLeaseStatus // 只能是 completed 或 failed，表示这个 turn 走到了终态
 }
 
 // TurnLeaseRepository 是 turn 租约需要的最小持久化能力；具体的短事务和并发裁决在实现里完成。
 type TurnLeaseRepository interface {
 	Acquire(ctx context.Context, request AcquireTurnLeaseRequest) (AcquireTurnLeaseResult, error)
+	Complete(ctx context.Context, request CompleteTurnRequest) (AssistantMessage, error)
 	Release(ctx context.Context, request ReleaseTurnLeaseRequest) error
 }
 
@@ -77,7 +102,7 @@ func NewTurnLeaseService(repository TurnLeaseRepository) *TurnLeaseService {
 
 // Acquire 获取（或续期/复用）Session 的 active turn 租约。
 func (s *TurnLeaseService) Acquire(ctx context.Context, request AcquireTurnLeaseRequest) (AcquireTurnLeaseResult, error) {
-	if request.UserID == "" || request.SessionID == "" || request.ClientMessageID == "" {
+	if request.UserID == "" || request.SessionID == "" || request.ClientMessageID == "" || request.Content == "" {
 		return AcquireTurnLeaseResult{}, errors.New("获取 turn 租约缺少必要标识")
 	}
 	if request.LeaseDuration <= 0 {
@@ -86,13 +111,25 @@ func (s *TurnLeaseService) Acquire(ctx context.Context, request AcquireTurnLease
 	return s.repository.Acquire(ctx, request)
 }
 
-// Release 把 turn 租约标记为终态（completed/failed），归还占用。
+// Complete 在一个短事务中写入 assistant 结果并完成 turn；attempt_no 防止旧执行者晚到覆盖。
+func (s *TurnLeaseService) Complete(ctx context.Context, request CompleteTurnRequest) (AssistantMessage, error) {
+	if request.UserID == "" || request.SessionID == "" || request.ClientMessageID == "" ||
+		request.AttemptNo <= 0 || request.UserMessageID <= 0 {
+		return AssistantMessage{}, errors.New("完成 turn 缺少必要标识")
+	}
+	if request.Content == "" {
+		return AssistantMessage{}, ErrEmptyAssistantMessage
+	}
+	return s.repository.Complete(ctx, request)
+}
+
+// Release 把未成功完成的 turn 标记为 failed，归还占用。成功路径必须走 Complete。
 func (s *TurnLeaseService) Release(ctx context.Context, request ReleaseTurnLeaseRequest) error {
-	if request.UserID == "" || request.SessionID == "" || request.ClientMessageID == "" {
+	if request.UserID == "" || request.SessionID == "" || request.ClientMessageID == "" || request.AttemptNo <= 0 {
 		return errors.New("释放 turn 租约缺少必要标识")
 	}
-	if request.Status != TurnLeaseCompleted && request.Status != TurnLeaseFailed {
-		return errors.New("释放 turn 租约的终态只能是 completed 或 failed")
+	if request.Status != TurnLeaseFailed {
+		return errors.New("释放 turn 租约只能标记为 failed，成功路径必须调用 Complete")
 	}
 	return s.repository.Release(ctx, request)
 }

@@ -107,6 +107,26 @@ func TestChatServiceStreamTruncatesLongReplyWithoutTreatingItAsFailure(t *testin
 	}
 }
 
+func TestChatServiceStreamCountsUnicodeCharactersAndTrimsOversizedDelta(t *testing.T) {
+	model := &sequencedChatModel{deltas: []string{"你好世界"}}
+	chatService := NewChatService(model, 2)
+
+	var forwarded []string
+	content, err := chatService.Stream(context.Background(), nil, func(delta string) error {
+		forwarded = append(forwarded, delta)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	if !strings.HasPrefix(content, "你好") || strings.Contains(content, "世界") {
+		t.Fatalf("content = %q, want exactly two Chinese characters before truncation notice", content)
+	}
+	if len(forwarded) != 2 || forwarded[0] != "你好" || forwarded[1] != truncationNotice {
+		t.Fatalf("forwarded = %q, want trimmed delta followed by truncation notice", forwarded)
+	}
+}
+
 func TestChatServiceStreamPropagatesRealModelErrorWithPartialContent(t *testing.T) {
 	wantErr := errors.New("upstream failed")
 	model := &sequencedChatModel{deltas: []string{"partial"}, streamErr: wantErr}

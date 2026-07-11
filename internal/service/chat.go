@@ -58,13 +58,25 @@ func (s *ChatService) Stream(ctx context.Context, history []ConversationMessage,
 	}
 
 	var content []byte
+	charCount := 0
 	truncated := false
 	err := s.model.Stream(ctx, messages, func(delta string) error {
-		if len(content) >= s.maxReplyChars {
+		deltaRunes := []rune(delta)
+		remaining := s.maxReplyChars - charCount
+		if len(deltaRunes) > remaining {
+			if remaining > 0 {
+				allowed := string(deltaRunes[:remaining])
+				content = append(content, allowed...)
+				charCount += remaining
+				if err := onDelta(allowed); err != nil {
+					return err
+				}
+			}
 			truncated = true
 			return errReplyTruncated
 		}
 		content = append(content, delta...)
+		charCount += len(deltaRunes)
 		return onDelta(delta)
 	})
 	if errors.Is(err, errReplyTruncated) {
@@ -84,4 +96,3 @@ func (s *ChatService) Stream(ctx context.Context, history []ConversationMessage,
 
 // errReplyTruncated 只在 Stream 内部用来打断 model.Stream 的读取循环，从不对外暴露。
 var errReplyTruncated = errors.New("assistant 回复已达到最大长度上限")
-

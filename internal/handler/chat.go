@@ -27,6 +27,43 @@ var clientMessageIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a
 
 const recentHistoryLimit = 20
 
+// setupSSE 检查连接是否支持流式输出，并在确定这个请求接下来一定会以 SSE 回应时才设定头。
+// 返回的 writeSSE 写一帧并立即 flush；写失败（客户端断开）返回 error 以便上游停止。
+// 调用时机很重要：一旦设完头，就不能再回头用 fail() 返 JSON 错误了（Content-Type 已经是
+// text/event-stream），只能用 writeSSE("error", ...) 收尾。
+func setupSSE(c *gin.Context) (func(event, data string) error, bool) {
+	// http.Flusher：每写一帧就 flush 到网络，否则会被缓冲着一次性发，流式就失意了。
+	// gin.ResponseWriter 本身实现了 http.Flusher，这里断言一下更显意图。
+	flusher, canFlush := c.Writer.(http.Flusher)
+	if !canFlush {
+		return nil, false
+	}
+
+	// SSE 响应头（必须在写任何 body 前设好）。
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no") // 关闭 Nginx 缓冲，保证逐帧下发
+
+	writeSSE := func(event, data string) error {
+		var b strings.Builder
+		if event != "" {
+			b.WriteString("event: ")
+			b.WriteString(event)
+			b.WriteByte('\n')
+		}
+		b.WriteString("data: ")
+		b.WriteString(data)
+		b.WriteString("\n\n")
+		if _, err := io.WriteString(c.Writer, b.String()); err != nil {
+			return err
+		}
+		flusher.Flush()
+		return nil
+	}
+	return writeSSE, true
+}
+
 // chatStreamHandler 处理一条用户消息，以 SSE 流式把模型回复逐段推给前端。
 // Content-Type: text/event-stream，每收到一段增量就 `data: {json}\n\n` 刷一帧，
 // 结束发一帧 `event: done`。客户端断开时：ctx 取消 + Write 报错双重兑底停止。
@@ -68,7 +105,12 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 		return
 	}
 
-	messageResult, err := s.messages.AppendUserMessage(c.Request.Context(), service.AppendUserMessageRequest{
+	// 在一个短事务中幂等写入 user 消息并裁决 turn。冲突请求会整体回滚，不会留下孤立 user 消息。
+	//   - active 且未过期 -> 返回处理中，不重新调用 LLM。
+	//   - active 已过期 -> 递增 attempt_no 后恢复执行。
+	//   - failed -> 原地重开为 active，当作一次合法重试（同样重新跑 LLM）。
+	//   - completed -> 不获取租约，下面直接回放当年落库的 assistant 回复，不重调 LLM。
+	leaseResult, err := s.turnLeases.Acquire(c.Request.Context(), service.AcquireTurnLeaseRequest{
 		UserID:          userID,
 		SessionID:       req.SessionID,
 		ClientMessageID: req.ClientMessageID,
@@ -83,26 +125,10 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 		fail(c, http.StatusNotFound, CodeNotFound, "会话不存在")
 		return
 	}
-	if err != nil {
-		s.log.Error("用户消息落库失败",
-			"trace_id", TraceIDFromContext(c.Request.Context()),
-			"error", err,
-		)
-		fail(c, http.StatusInternalServerError, CodeInternal, "消息服务暂时不可用")
+	if errors.Is(err, service.ErrTurnInProgress) {
+		fail(c, http.StatusConflict, CodeConflict, "该消息正在处理中，请稍后重试")
 		return
 	}
-	if !messageResult.Created {
-		fail(c, http.StatusConflict, CodeConflict, "消息已提交，请勿重复发送")
-		return
-	}
-
-	// 占用本次 turn 的租约：防止同一 Session 被两个请求同时处理（重复点击/前端重试）。
-	// 占不到就是别的请求正占着（还没过期），直接 409，不再往下走。
-	leaseResult, err := s.turnLeases.Acquire(c.Request.Context(), service.AcquireTurnLeaseRequest{
-		UserID:          userID,
-		SessionID:       req.SessionID,
-		ClientMessageID: req.ClientMessageID,
-	})
 	if errors.Is(err, service.ErrTurnLeaseConflict) {
 		fail(c, http.StatusConflict, CodeConflict, "该会话正在处理上一条消息，请稍后重试")
 		return
@@ -116,28 +142,31 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 		return
 	}
 	if !leaseResult.Acquired {
-		// 走到这里说明这个全新的 client_message_id 竟然已经有历史终态租约记录，属于异常状态，
-		// 按冲突处理更安全：不重复触发 LLM 调用。
-		s.log.Error("turn 租约状态异常：新消息命中历史终态记录",
-			"trace_id", TraceIDFromContext(c.Request.Context()),
-			"lease_status", leaseResult.Lease.Status,
-		)
-		fail(c, http.StatusConflict, CodeConflict, "消息已处理，请勿重复发送")
+		if leaseResult.Lease.Status != service.TurnLeaseCompleted || leaseResult.Lease.ResultMessageID <= 0 {
+			s.log.Error("completed turn 缺少结果消息",
+				"trace_id", TraceIDFromContext(c.Request.Context()),
+				"turn_id", leaseResult.Lease.ID,
+			)
+			fail(c, http.StatusInternalServerError, CodeInternal, "对话服务暂时不可用")
+			return
+		}
+		s.replayCompletedTurn(c, userID, req.SessionID, leaseResult.Lease.ResultMessageID)
 		return
 	}
 
-	// 无论后面正常结束、LLM 报错还是落库失败，都必须释放租约，否则这个 Session 会一直
-	// 被锁到租约自然过期。用 defer + 独立 context：客户端断开/请求超时时 c.Request.Context()
-	// 可能已经被取消，释放这个"短事务写"不应该跟着客户端的生命周期一起被取消。
-	leaseStatus := service.TurnLeaseFailed
+	turnCompleted := false
 	defer func() {
+		if turnCompleted {
+			return
+		}
 		releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer releaseCancel()
 		if releaseErr := s.turnLeases.Release(releaseCtx, service.ReleaseTurnLeaseRequest{
 			UserID:          userID,
 			SessionID:       req.SessionID,
 			ClientMessageID: req.ClientMessageID,
-			Status:          leaseStatus,
+			AttemptNo:       leaseResult.Lease.AttemptNo,
+			Status:          service.TurnLeaseFailed,
 		}); releaseErr != nil {
 			s.log.Error("释放 turn 租约失败",
 				"trace_id", TraceIDFromContext(c.Request.Context()),
@@ -156,40 +185,15 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 		return
 	}
 
-	// http.Flusher：每写一帧就 flush 到网络，否则会被缓冲攺着一次性发，流式就失意了。
-	// gin.ResponseWriter 本身实现了 http.Flusher，这里断言一下更显意图。
-	flusher, canFlush := c.Writer.(http.Flusher)
+	// http.Flusher 检查 + SSE 头都抽到 setupSSE 里了，回放分支和正常分支共用。
+	writeSSE, canFlush := setupSSE(c)
 	if !canFlush {
 		fail(c, http.StatusInternalServerError, CodeInternal, "服务器不支持流式输出")
 		return
 	}
 
-	// SSE 响应头（必须在写任何 body 前设好）。
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no") // 关闭 Nginx 缓冲，保证逐帧下发
-
 	ctx, cancel := context.WithTimeout(c.Request.Context(), s.chat.Timeout())
 	defer cancel()
-
-	// writeSSE 写一帧并立即 flush；写失败（客户端断开）返回 error 以便上游停止。
-	writeSSE := func(event, data string) error {
-		var b strings.Builder
-		if event != "" {
-			b.WriteString("event: ")
-			b.WriteString(event)
-			b.WriteByte('\n')
-		}
-		b.WriteString("data: ")
-		b.WriteString(data)
-		b.WriteString("\n\n")
-		if _, err := io.WriteString(c.Writer, b.String()); err != nil {
-			return err
-		}
-		flusher.Flush()
-		return nil
-	}
 
 	// 把一段增量包成 JSON 再下发，避免文本里的换行破坏 SSE 帧结构。
 	// 这里只做协议转换，不做任何累积/截断判断——那些属于业务规则，由 ChatService.Stream 统一处理。
@@ -198,13 +202,44 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 		return writeSSE("", string(payload))
 	}
 
+	// persistAndFinish 是"正常回复"和"降级兜底回复"共享的收尾规则：先落库，落库成功才发 `done`；
+	// 落库失败发 `error`，绝不能让客户端已经看到的内容和数据库历史不一致。
+	// 返回值表示这一轮 turn 是否真正走到了成功终态（用于决定 leaseStatus）。
+	persistAndFinish := func(content string) bool {
+		if _, err := s.turnLeases.Complete(c.Request.Context(), service.CompleteTurnRequest{
+			UserID:          userID,
+			SessionID:       req.SessionID,
+			ClientMessageID: req.ClientMessageID,
+			AttemptNo:       leaseResult.Lease.AttemptNo,
+			UserMessageID:   leaseResult.UserMessage.ID,
+			Content:         content,
+			TraceID:         TraceIDFromContext(c.Request.Context()),
+		}); err != nil {
+			s.log.Error("assistant 消息落库失败",
+				"trace_id", TraceIDFromContext(c.Request.Context()),
+				"error", err,
+			)
+			_ = writeSSE("error", `{"message":"回复保存失败，请稍后重试"}`)
+			return false
+		}
+		turnCompleted = true
+		if err := writeSSE("done", "{}"); err != nil {
+			s.log.Warn("turn 已完成但 done 事件发送失败",
+				"trace_id", TraceIDFromContext(c.Request.Context()),
+				"error", err,
+			)
+		}
+		return true
+	}
+
 	assistantContent, err := s.chat.Stream(ctx, history, sendDelta)
 	if err != nil {
 		// 未配置 Key：不算服务故障，当作一段普通回复流出去，方便本地先跑通链路。
+		// 兜底回复也要走跟正常回复一样的落库规则，否则刷新后历史里会缺这一轮 assistant 回复。
 		if errors.Is(err, llm.ErrNotConfigured) {
-			_ = sendDelta("（未配置大模型 API Key，请在 .env 填入 DEEPSEEK_API_KEY 后重试）")
-			_ = writeSSE("done", "{}")
-			leaseStatus = service.TurnLeaseCompleted
+			fallback := "（未配置大模型 API Key，请在 .env 填入 DEEPSEEK_API_KEY 后重试）"
+			_ = sendDelta(fallback)
+			persistAndFinish(fallback)
 			return
 		}
 		s.log.Error("流式对话调用失败",
@@ -216,20 +251,44 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 		return
 	}
 
-	if _, err := s.messages.AppendAssistantMessage(c.Request.Context(), service.AppendAssistantMessageRequest{
-		UserID:    userID,
-		SessionID: req.SessionID,
-		Content:   assistantContent,
-		TraceID:   TraceIDFromContext(c.Request.Context()),
-	}); err != nil {
-		s.log.Error("assistant 消息落库失败",
+	persistAndFinish(assistantContent)
+}
+
+// replayCompletedTurn 处理"结果恢复协议"里的回放场景：同一条用户消息对应的 turn 之前已经
+// completed，说明上一次已经成功拿到过 assistant 回复并落库，这里只需要把它原样发给客户端，
+// 绝不重新调用 LLM（否则同一条消息可能得到两份不一样的回复，还白花一次调用成本）。
+//
+// userMessageSeq 是这条用户消息自己的 seq；由于一个 Session 同一时刻最多一个进行中的 turn
+// （turn 租约保证），它的回复必然是 seq 恰好比它大 1 的那条 assistant 消息。
+func (s *Server) replayCompletedTurn(c *gin.Context, userID, sessionID string, resultMessageID int64) {
+	reply, found, err := s.messages.FindReplyForTurn(c.Request.Context(), userID, sessionID, resultMessageID)
+	if err != nil {
+		s.log.Error("查询待回放的 assistant 回复失败",
 			"trace_id", TraceIDFromContext(c.Request.Context()),
 			"error", err,
 		)
-		_ = writeSSE("error", `{"message":"回复保存失败，请稍后重试"}`)
+		fail(c, http.StatusInternalServerError, CodeInternal, "对话服务暂时不可用")
+		return
+	}
+	if !found {
+		// 数据不一致：租约说这一轮已经 completed，却查不到对应的 assistant 回复。
+		// 按服务不可用处理，不能凭空编一个回复，也不能重新调用 LLM 掩盖这个异常。
+		s.log.Error("turn 租约状态为 completed，但找不到对应的 assistant 回复",
+			"trace_id", TraceIDFromContext(c.Request.Context()),
+			"result_message_id", resultMessageID,
+		)
+		fail(c, http.StatusInternalServerError, CodeInternal, "对话服务暂时不可用")
 		return
 	}
 
+	writeSSE, canFlush := setupSSE(c)
+	if !canFlush {
+		fail(c, http.StatusInternalServerError, CodeInternal, "服务器不支持流式输出")
+		return
+	}
+	payload, _ := json.Marshal(map[string]string{"delta": reply.Content})
+	if err := writeSSE("", string(payload)); err != nil {
+		return // 客户端已断开，没必要再发 done。
+	}
 	_ = writeSSE("done", "{}")
-	leaseStatus = service.TurnLeaseCompleted
 }

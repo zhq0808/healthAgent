@@ -28,8 +28,21 @@ func (r *PostgresMessageRepository) AppendUserMessage(ctx context.Context, reque
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	result, err := appendUserMessageTx(ctx, tx, request)
+	if err != nil {
+		return service.AppendUserMessageResult{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return service.AppendUserMessageResult{}, fmt.Errorf("提交用户消息事务失败: %w", err)
+	}
+	return result, nil
+}
+
+// appendUserMessageTx 在调用方提供的短事务中锁定 Session、分配 seq，并幂等写入用户消息。
+// 调用方负责提交或回滚事务。
+func appendUserMessageTx(ctx context.Context, tx pgx.Tx, request service.AppendUserMessageRequest) (service.AppendUserMessageResult, error) {
 	var messageCount int
-	err = tx.QueryRow(ctx, `
+	err := tx.QueryRow(ctx, `
 		SELECT message_count
 		FROM agent_memory_session
 		WHERE session_id = $1
@@ -53,9 +66,6 @@ func (r *PostgresMessageRepository) AppendUserMessage(ctx context.Context, reque
 		  AND client_message_id = $3
 		  AND role = 'user'`, request.UserID, request.SessionID, request.ClientMessageID))
 	if err == nil {
-		if err := tx.Commit(ctx); err != nil {
-			return service.AppendUserMessageResult{}, fmt.Errorf("提交幂等消息查询失败: %w", err)
-		}
 		return service.AppendUserMessageResult{Message: existing, Created: false}, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
@@ -96,9 +106,6 @@ func (r *PostgresMessageRepository) AppendUserMessage(ctx context.Context, reque
 		return service.AppendUserMessageResult{}, fmt.Errorf("更新会话消息计数影响行数异常: %d", command.RowsAffected())
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return service.AppendUserMessageResult{}, fmt.Errorf("提交用户消息事务失败: %w", err)
-	}
 	return service.AppendUserMessageResult{Message: message, Created: true}, nil
 }
 
@@ -110,8 +117,21 @@ func (r *PostgresMessageRepository) AppendAssistantMessage(ctx context.Context, 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	message, err := appendAssistantMessageTx(ctx, tx, request)
+	if err != nil {
+		return service.AssistantMessage{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return service.AssistantMessage{}, fmt.Errorf("提交 assistant 消息事务失败: %w", err)
+	}
+	return message, nil
+}
+
+// appendAssistantMessageTx 在调用方提供的短事务中追加 assistant 消息并更新 Session 计数。
+// ParentID 为 0 时保持 NULL；调用方负责提交或回滚事务。
+func appendAssistantMessageTx(ctx context.Context, tx pgx.Tx, request service.AppendAssistantMessageRequest) (service.AssistantMessage, error) {
 	var messageCount int
-	err = tx.QueryRow(ctx, `
+	err := tx.QueryRow(ctx, `
 		SELECT message_count
 		FROM agent_memory_session
 		WHERE session_id = $1
@@ -129,16 +149,17 @@ func (r *PostgresMessageRepository) AppendAssistantMessage(ctx context.Context, 
 	nextSeq := messageCount + 1
 	message, err := scanAssistantMessage(tx.QueryRow(ctx, `
 		INSERT INTO agent_memory_episodic (
-			session_id, user_id, agent_id, seq, role, status,
+			session_id, user_id, agent_id, seq, parent_id, role, status,
 			content, trace_id
 		)
-		VALUES ($1, $2, $3, $4, 'assistant', 'completed', $5, $6)
+		VALUES ($1, $2, $3, $4, NULLIF($5, 0), 'assistant', 'completed', $6, $7)
 		RETURNING id, user_id, session_id, seq,
 		          COALESCE(content, ''), COALESCE(trace_id, ''), created_at`,
 		request.SessionID,
 		request.UserID,
 		service.HealthAgentID,
 		nextSeq,
+		request.ParentID,
 		request.Content,
 		request.TraceID,
 	))
@@ -159,9 +180,6 @@ func (r *PostgresMessageRepository) AppendAssistantMessage(ctx context.Context, 
 		return service.AssistantMessage{}, fmt.Errorf("更新会话消息计数影响行数异常: %d", command.RowsAffected())
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return service.AssistantMessage{}, fmt.Errorf("提交 assistant 消息事务失败: %w", err)
-	}
 	return message, nil
 }
 
@@ -199,6 +217,26 @@ func (r *PostgresMessageRepository) LoadRecent(ctx context.Context, userID, sess
 		return nil, fmt.Errorf("遍历对话历史失败: %w", err)
 	}
 	return messages, nil
+}
+
+// FindAssistantReplyByID 按 completed turn 保存的结果消息 ID 查询 assistant 回复。
+func (r *PostgresMessageRepository) FindAssistantReplyByID(ctx context.Context, userID, sessionID string, messageID int64) (service.AssistantMessage, bool, error) {
+	message, err := scanAssistantMessage(r.pool.QueryRow(ctx, `
+		SELECT id, user_id, session_id, seq, COALESCE(content, ''), COALESCE(trace_id, ''), created_at
+		FROM agent_memory_episodic
+		WHERE id = $1
+		  AND user_id = $2
+		  AND session_id = $3
+		  AND role = 'assistant'
+		  AND status = 'completed'
+		  AND deleted_at IS NULL`, messageID, userID, sessionID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return service.AssistantMessage{}, false, nil
+	}
+	if err != nil {
+		return service.AssistantMessage{}, false, fmt.Errorf("查询 assistant 回放消息失败: %w", err)
+	}
+	return message, true, nil
 }
 
 func scanUserMessage(row pgx.Row) (service.UserMessage, error) {

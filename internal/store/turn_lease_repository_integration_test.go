@@ -62,6 +62,7 @@ func TestPostgresTurnLeaseRepositoryAcquireAndRelease(t *testing.T) {
 		UserID:          userID,
 		SessionID:       sessionID,
 		ClientMessageID: firstMessageID,
+		Content:         "first question",
 		LeaseDuration:   time.Minute,
 	})
 	if err != nil {
@@ -71,21 +72,16 @@ func TestPostgresTurnLeaseRepositoryAcquireAndRelease(t *testing.T) {
 		t.Fatalf("first acquire result = %+v, want acquired active", first)
 	}
 
-	// 2. 同一 client_message_id 重试（模拟断线重连），复用同一行并续期，不新建记录。
-	renewed, err := turnLeaseService.Acquire(ctx, service.AcquireTurnLeaseRequest{
+	// 2. 同一 client_message_id 在租约未过期时重试，只能得到“处理中”，不能续期或获得执行权。
+	_, err = turnLeaseService.Acquire(ctx, service.AcquireTurnLeaseRequest{
 		UserID:          userID,
 		SessionID:       sessionID,
 		ClientMessageID: firstMessageID,
+		Content:         "first question",
 		LeaseDuration:   time.Minute,
 	})
-	if err != nil {
-		t.Fatalf("renew acquire: %v", err)
-	}
-	if !renewed.Acquired || renewed.Lease.ID != first.Lease.ID {
-		t.Fatalf("renew acquire result = %+v, want acquired same id %d", renewed, first.Lease.ID)
-	}
-	if !renewed.Lease.LeaseExpiresAt.After(first.Lease.LeaseExpiresAt) {
-		t.Fatalf("renewed lease_expires_at = %v, want after %v", renewed.Lease.LeaseExpiresAt, first.Lease.LeaseExpiresAt)
+	if !errors.Is(err, service.ErrTurnInProgress) {
+		t.Fatalf("duplicate active acquire error = %v, want ErrTurnInProgress", err)
 	}
 
 	// 3. 别的 client_message_id 在租约未过期时来抢，必须冲突。
@@ -94,25 +90,39 @@ func TestPostgresTurnLeaseRepositoryAcquireAndRelease(t *testing.T) {
 		UserID:          userID,
 		SessionID:       sessionID,
 		ClientMessageID: secondMessageID,
+		Content:         "second question",
 		LeaseDuration:   time.Minute,
 	})
 	if !errors.Is(err, service.ErrTurnLeaseConflict) {
 		t.Fatalf("conflicting acquire error = %v, want ErrTurnLeaseConflict", err)
 	}
+	var rejectedMessageCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_memory_episodic
+		WHERE session_id = $1 AND client_message_id = $2`, sessionID, secondMessageID).Scan(&rejectedMessageCount); err != nil {
+		t.Fatalf("count rejected user message: %v", err)
+	}
+	if rejectedMessageCount != 0 {
+		t.Fatalf("rejected user message count = %d, want 0 because acquire transaction must roll back", rejectedMessageCount)
+	}
 
 	// 4. 释放后，别的 client_message_id 才能获取新的 active 租约。
-	if err := turnLeaseService.Release(ctx, service.ReleaseTurnLeaseRequest{
+	firstReply, err := turnLeaseService.Complete(ctx, service.CompleteTurnRequest{
 		UserID:          userID,
 		SessionID:       sessionID,
 		ClientMessageID: firstMessageID,
-		Status:          service.TurnLeaseCompleted,
-	}); err != nil {
-		t.Fatalf("release first lease: %v", err)
+		AttemptNo:       first.Lease.AttemptNo,
+		UserMessageID:   first.UserMessage.ID,
+		Content:         "first answer",
+	})
+	if err != nil {
+		t.Fatalf("complete first turn: %v", err)
 	}
 	second, err := turnLeaseService.Acquire(ctx, service.AcquireTurnLeaseRequest{
 		UserID:          userID,
 		SessionID:       sessionID,
 		ClientMessageID: secondMessageID,
+		Content:         "second question",
 		LeaseDuration:   time.Minute,
 	})
 	if err != nil {
@@ -127,23 +137,27 @@ func TestPostgresTurnLeaseRepositoryAcquireAndRelease(t *testing.T) {
 		UserID:          userID,
 		SessionID:       sessionID,
 		ClientMessageID: firstMessageID,
+		Content:         "first question",
 		LeaseDuration:   time.Minute,
 	})
 	if err != nil {
 		t.Fatalf("acquire terminal client_message_id: %v", err)
 	}
-	if terminalHit.Acquired || terminalHit.Lease.Status != service.TurnLeaseCompleted {
+	if terminalHit.Acquired || terminalHit.Lease.Status != service.TurnLeaseCompleted ||
+		terminalHit.Lease.ResultMessageID != firstReply.ID {
 		t.Fatalf("terminal acquire result = %+v, want not acquired + completed", terminalHit)
 	}
 
 	// 释放掉步骤 4 留下的 active 租约，让 Session 回到空闲，才能测下面的过期抢占场景。
-	if err := turnLeaseService.Release(ctx, service.ReleaseTurnLeaseRequest{
+	if _, err := turnLeaseService.Complete(ctx, service.CompleteTurnRequest{
 		UserID:          userID,
 		SessionID:       sessionID,
 		ClientMessageID: secondMessageID,
-		Status:          service.TurnLeaseCompleted,
+		AttemptNo:       second.Lease.AttemptNo,
+		UserMessageID:   second.UserMessage.ID,
+		Content:         "second answer",
 	}); err != nil {
-		t.Fatalf("release second lease: %v", err)
+		t.Fatalf("complete second turn: %v", err)
 	}
 
 	// 6. 已过期但仍标记 active 的旧占用者应被判定失败并腾出位置，新 client_message_id 可以拿到租约。
@@ -152,6 +166,7 @@ func TestPostgresTurnLeaseRepositoryAcquireAndRelease(t *testing.T) {
 		UserID:          userID,
 		SessionID:       sessionID,
 		ClientMessageID: expiringMessageID,
+		Content:         "expiring question",
 		LeaseDuration:   time.Millisecond,
 	})
 	if err != nil || !expiring.Acquired {
@@ -164,6 +179,7 @@ func TestPostgresTurnLeaseRepositoryAcquireAndRelease(t *testing.T) {
 		UserID:          userID,
 		SessionID:       sessionID,
 		ClientMessageID: reclaimMessageID,
+		Content:         "replacement question",
 		LeaseDuration:   time.Minute,
 	})
 	if err != nil {
@@ -184,13 +200,15 @@ func TestPostgresTurnLeaseRepositoryAcquireAndRelease(t *testing.T) {
 
 	// 释放掉步骤 6 留下的 active 租约，确保下面的 FK 校验测的是"用户不归属该会话"，
 	// 而不是先撞上"会话已被占用"的冲突分支。
-	if err := turnLeaseService.Release(ctx, service.ReleaseTurnLeaseRequest{
+	if _, err := turnLeaseService.Complete(ctx, service.CompleteTurnRequest{
 		UserID:          userID,
 		SessionID:       sessionID,
 		ClientMessageID: reclaimMessageID,
-		Status:          service.TurnLeaseCompleted,
+		AttemptNo:       reclaimed.Lease.AttemptNo,
+		UserMessageID:   reclaimed.UserMessage.ID,
+		Content:         "replacement answer",
 	}); err != nil {
-		t.Fatalf("release reclaimed lease: %v", err)
+		t.Fatalf("complete reclaimed turn: %v", err)
 	}
 
 	// 7. session/user 不匹配（无归属关系）必须返回 ErrSessionNotFound，不能把租约挂到别人会话上。
@@ -198,10 +216,139 @@ func TestPostgresTurnLeaseRepositoryAcquireAndRelease(t *testing.T) {
 		UserID:          otherUser,
 		SessionID:       sessionID,
 		ClientMessageID: "00000000-0000-4000-8000-000000000094",
+		Content:         "foreign question",
 		LeaseDuration:   time.Minute,
 	})
 	if !errors.Is(err, service.ErrSessionNotFound) {
 		t.Fatalf("mismatched owner acquire error = %v, want ErrSessionNotFound", err)
+	}
+}
+
+// TestPostgresTurnLeaseRepositoryAcquireReopensFailedLeaseForRetry 验证"上一次失败后重试"这条
+// 结果恢复路径：同一个 client_message_id 在租约变成 failed 之后再次获取，必须原地把这一行改回
+// active（不是插入新行），因为 (session_id, client_message_id) 是全局唯一约束，同一条消息永远
+// 只能有一条租约记录。
+func TestPostgresTurnLeaseRepositoryAcquireReopensFailedLeaseForRetry(t *testing.T) {
+	if os.Getenv("HEALTH_AGENT_INTEGRATION_TEST") != "1" {
+		t.Skip("set HEALTH_AGENT_INTEGRATION_TEST=1 to run PostgreSQL integration tests")
+	}
+
+	cfg, err := config.Load("../../config.yaml")
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	pool, err := store.NewPostgres(cfg.Postgres)
+	if err != nil {
+		t.Fatalf("connect postgres: %v", err)
+	}
+	defer pool.Close()
+	if err := store.RunMigrations(cfg.Postgres, os.DirFS("../../migrations"), "."); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	const (
+		userID    = "usr_turn_lease_retry_test"
+		sessionID = "session_00000000000000000000000000000095"
+	)
+	ctx := context.Background()
+	cleanupTurnLeaseRepositoryTest(t, pool, userID)
+	defer cleanupTurnLeaseRepositoryTest(t, pool, userID)
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO agent_user (user_id, user_type, status)
+		VALUES ($1, 0, 0)`, userID); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO agent_memory_session (session_id, user_id)
+		VALUES ($1, $2)`, sessionID, userID); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+
+	turnLeaseService := service.NewTurnLeaseService(store.NewPostgresTurnLeaseRepository(pool))
+	messageID := "00000000-0000-4000-8000-000000000095"
+
+	first, err := turnLeaseService.Acquire(ctx, service.AcquireTurnLeaseRequest{
+		UserID:          userID,
+		SessionID:       sessionID,
+		ClientMessageID: messageID,
+		Content:         "retry question",
+		LeaseDuration:   time.Minute,
+	})
+	if err != nil || !first.Acquired {
+		t.Fatalf("first acquire: result=%+v err=%v", first, err)
+	}
+
+	// 上一次处理确实失败了（例如 LLM 报错、超时或 assistant 落库失败）。
+	if err := turnLeaseService.Release(ctx, service.ReleaseTurnLeaseRequest{
+		UserID:          userID,
+		SessionID:       sessionID,
+		ClientMessageID: messageID,
+		AttemptNo:       first.Lease.AttemptNo,
+		Status:          service.TurnLeaseFailed,
+	}); err != nil {
+		t.Fatalf("release as failed: %v", err)
+	}
+
+	// 客户端用同一个 client_message_id 重试：必须重新拿到 active 租约，且是原地复用同一行
+	// （而不是新建一行），否则会撞上 (session_id, client_message_id) 的唯一约束。
+	retry, err := turnLeaseService.Acquire(ctx, service.AcquireTurnLeaseRequest{
+		UserID:          userID,
+		SessionID:       sessionID,
+		ClientMessageID: messageID,
+		Content:         "retry question",
+		LeaseDuration:   time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("retry acquire after failure: %v", err)
+	}
+	if !retry.Acquired || retry.Lease.ID != first.Lease.ID || retry.Lease.Status != service.TurnLeaseActive {
+		t.Fatalf("retry acquire result = %+v, want acquired + same row id %d + active", retry, first.Lease.ID)
+	}
+	if retry.Lease.AttemptNo != first.Lease.AttemptNo+1 {
+		t.Fatalf("retry attempt_no = %d, want %d", retry.Lease.AttemptNo, first.Lease.AttemptNo+1)
+	}
+
+	var rowCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_turn_lease WHERE session_id = $1 AND client_message_id = $2`,
+		sessionID, messageID).Scan(&rowCount); err != nil {
+		t.Fatalf("count lease rows: %v", err)
+	}
+	if rowCount != 1 {
+		t.Fatalf("lease row count = %d, want exactly 1 (reopened in place, not duplicated)", rowCount)
+	}
+
+	_, err = turnLeaseService.Complete(ctx, service.CompleteTurnRequest{
+		UserID:          userID,
+		SessionID:       sessionID,
+		ClientMessageID: messageID,
+		AttemptNo:       first.Lease.AttemptNo,
+		UserMessageID:   first.UserMessage.ID,
+		Content:         "stale answer",
+	})
+	if !errors.Is(err, service.ErrTurnLeaseLost) {
+		t.Fatalf("stale Complete() error = %v, want ErrTurnLeaseLost", err)
+	}
+	var staleReplyCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_memory_episodic
+		WHERE session_id = $1 AND parent_id = $2 AND role = 'assistant'`, sessionID, first.UserMessage.ID).Scan(&staleReplyCount); err != nil {
+		t.Fatalf("count stale replies: %v", err)
+	}
+	if staleReplyCount != 0 {
+		t.Fatalf("stale reply count = %d, want 0", staleReplyCount)
+	}
+
+	if _, err := turnLeaseService.Complete(ctx, service.CompleteTurnRequest{
+		UserID:          userID,
+		SessionID:       sessionID,
+		ClientMessageID: messageID,
+		AttemptNo:       retry.Lease.AttemptNo,
+		UserMessageID:   retry.UserMessage.ID,
+		Content:         "retry answer",
+	}); err != nil {
+		t.Fatalf("complete after retry: %v", err)
 	}
 }
 
@@ -270,6 +417,7 @@ func TestPostgresTurnLeaseRepositoryAcquireIsSerializedAcrossInstances(t *testin
 				UserID:          userID,
 				SessionID:       sessionID,
 				ClientMessageID: clientMessageID,
+				Content:         "parallel question " + clientMessageID,
 				LeaseDuration:   time.Minute,
 			})
 			results <- outcome{acquired: result.Acquired, err: acquireErr}
@@ -311,6 +459,9 @@ func cleanupTurnLeaseRepositoryTest(t *testing.T, pool *pgxpool.Pool, userIDs ..
 	for _, userID := range userIDs {
 		if _, err := pool.Exec(ctx, `DELETE FROM agent_turn_lease WHERE user_id = $1`, userID); err != nil {
 			t.Fatalf("cleanup turn leases: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM agent_memory_episodic WHERE user_id = $1`, userID); err != nil {
+			t.Fatalf("cleanup messages: %v", err)
 		}
 		if _, err := pool.Exec(ctx, `DELETE FROM agent_memory_session WHERE user_id = $1`, userID); err != nil {
 			t.Fatalf("cleanup sessions: %v", err)

@@ -8,11 +8,19 @@ import (
 )
 
 type fakeTurnLeaseRepository struct {
-	acquireResult  AcquireTurnLeaseResult
-	acquireErr     error
-	releaseErr     error
-	lastAcquireReq AcquireTurnLeaseRequest
-	lastReleaseReq ReleaseTurnLeaseRequest
+	acquireResult   AcquireTurnLeaseResult
+	acquireErr      error
+	releaseErr      error
+	completeResult  AssistantMessage
+	completeErr     error
+	lastAcquireReq  AcquireTurnLeaseRequest
+	lastCompleteReq CompleteTurnRequest
+	lastReleaseReq  ReleaseTurnLeaseRequest
+}
+
+func (r *fakeTurnLeaseRepository) Complete(_ context.Context, request CompleteTurnRequest) (AssistantMessage, error) {
+	r.lastCompleteReq = request
+	return r.completeResult, r.completeErr
 }
 
 func (r *fakeTurnLeaseRepository) Acquire(_ context.Context, request AcquireTurnLeaseRequest) (AcquireTurnLeaseResult, error) {
@@ -42,6 +50,7 @@ func TestTurnLeaseServiceAcquireAppliesDefaultLeaseDuration(t *testing.T) {
 		UserID:          "usr_owner",
 		SessionID:       "session_owner",
 		ClientMessageID: "00000000-0000-4000-8000-000000000001",
+		Content:         "hello",
 	})
 	if err != nil {
 		t.Fatalf("Acquire() error = %v", err)
@@ -60,6 +69,7 @@ func TestTurnLeaseServiceAcquireKeepsExplicitLeaseDuration(t *testing.T) {
 		UserID:          "usr_owner",
 		SessionID:       "session_owner",
 		ClientMessageID: "00000000-0000-4000-8000-000000000002",
+		Content:         "hello",
 		LeaseDuration:   explicit,
 	})
 	if err != nil {
@@ -78,6 +88,7 @@ func TestTurnLeaseServiceAcquirePropagatesConflict(t *testing.T) {
 		UserID:          "usr_owner",
 		SessionID:       "session_owner",
 		ClientMessageID: "00000000-0000-4000-8000-000000000003",
+		Content:         "hello",
 	})
 	if !errors.Is(err, ErrTurnLeaseConflict) {
 		t.Fatalf("Acquire() error = %v, want ErrTurnLeaseConflict", err)
@@ -91,6 +102,7 @@ func TestTurnLeaseServiceReleaseRejectsNonTerminalStatus(t *testing.T) {
 		UserID:          "usr_owner",
 		SessionID:       "session_owner",
 		ClientMessageID: "00000000-0000-4000-8000-000000000004",
+		AttemptNo:       1,
 		Status:          TurnLeaseActive,
 	})
 	if err == nil {
@@ -106,12 +118,34 @@ func TestTurnLeaseServiceReleasePassesThroughRepository(t *testing.T) {
 		UserID:          "usr_owner",
 		SessionID:       "session_owner",
 		ClientMessageID: "00000000-0000-4000-8000-000000000005",
-		Status:          TurnLeaseCompleted,
+		AttemptNo:       1,
+		Status:          TurnLeaseFailed,
 	}
 	if err := turnLeaseService.Release(t.Context(), request); err != nil {
 		t.Fatalf("Release() error = %v", err)
 	}
 	if repository.lastReleaseReq != request {
 		t.Fatalf("lastReleaseReq = %+v, want %+v", repository.lastReleaseReq, request)
+	}
+}
+
+func TestTurnLeaseServiceCompletePassesFencingIdentifiers(t *testing.T) {
+	repository := &fakeTurnLeaseRepository{completeResult: AssistantMessage{ID: 9}}
+	turnLeaseService := NewTurnLeaseService(repository)
+	request := CompleteTurnRequest{
+		UserID:          "usr_owner",
+		SessionID:       "session_owner",
+		ClientMessageID: "00000000-0000-4000-8000-000000000006",
+		AttemptNo:       2,
+		UserMessageID:   7,
+		Content:         "reply",
+	}
+
+	result, err := turnLeaseService.Complete(t.Context(), request)
+	if err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+	if result.ID != 9 || repository.lastCompleteReq != request {
+		t.Fatalf("Complete() result=%+v request=%+v", result, repository.lastCompleteReq)
 	}
 }
