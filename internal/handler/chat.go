@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -95,6 +96,56 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 		return
 	}
 
+	// 占用本次 turn 的租约：防止同一 Session 被两个请求同时处理（重复点击/前端重试）。
+	// 占不到就是别的请求正占着（还没过期），直接 409，不再往下走。
+	leaseResult, err := s.turnLeases.Acquire(c.Request.Context(), service.AcquireTurnLeaseRequest{
+		UserID:          userID,
+		SessionID:       req.SessionID,
+		ClientMessageID: req.ClientMessageID,
+	})
+	if errors.Is(err, service.ErrTurnLeaseConflict) {
+		fail(c, http.StatusConflict, CodeConflict, "该会话正在处理上一条消息，请稍后重试")
+		return
+	}
+	if err != nil {
+		s.log.Error("获取 turn 租约失败",
+			"trace_id", TraceIDFromContext(c.Request.Context()),
+			"error", err,
+		)
+		fail(c, http.StatusInternalServerError, CodeInternal, "对话服务暂时不可用")
+		return
+	}
+	if !leaseResult.Acquired {
+		// 走到这里说明这个全新的 client_message_id 竟然已经有历史终态租约记录，属于异常状态，
+		// 按冲突处理更安全：不重复触发 LLM 调用。
+		s.log.Error("turn 租约状态异常：新消息命中历史终态记录",
+			"trace_id", TraceIDFromContext(c.Request.Context()),
+			"lease_status", leaseResult.Lease.Status,
+		)
+		fail(c, http.StatusConflict, CodeConflict, "消息已处理，请勿重复发送")
+		return
+	}
+
+	// 无论后面正常结束、LLM 报错还是落库失败，都必须释放租约，否则这个 Session 会一直
+	// 被锁到租约自然过期。用 defer + 独立 context：客户端断开/请求超时时 c.Request.Context()
+	// 可能已经被取消，释放这个"短事务写"不应该跟着客户端的生命周期一起被取消。
+	leaseStatus := service.TurnLeaseFailed
+	defer func() {
+		releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer releaseCancel()
+		if releaseErr := s.turnLeases.Release(releaseCtx, service.ReleaseTurnLeaseRequest{
+			UserID:          userID,
+			SessionID:       req.SessionID,
+			ClientMessageID: req.ClientMessageID,
+			Status:          leaseStatus,
+		}); releaseErr != nil {
+			s.log.Error("释放 turn 租约失败",
+				"trace_id", TraceIDFromContext(c.Request.Context()),
+				"error", releaseErr,
+			)
+		}
+	}()
+
 	history, err := s.messages.LoadRecent(c.Request.Context(), userID, req.SessionID, recentHistoryLimit)
 	if err != nil {
 		s.log.Error("读取对话历史失败",
@@ -154,6 +205,7 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 		if errors.Is(err, llm.ErrNotConfigured) {
 			_ = sendDelta("（未配置大模型 API Key，请在 .env 填入 DEEPSEEK_API_KEY 后重试）")
 			_ = writeSSE("done", "{}")
+			leaseStatus = service.TurnLeaseCompleted
 			return
 		}
 		s.log.Error("流式对话调用失败",
@@ -180,4 +232,5 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 	}
 
 	_ = writeSSE("done", "{}")
+	leaseStatus = service.TurnLeaseCompleted
 }

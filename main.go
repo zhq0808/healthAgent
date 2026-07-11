@@ -91,7 +91,9 @@ func run() error {
 	sessionService := service.NewSessionService(sessionRepository)
 	messageRepository := store.NewPostgresMessageRepository(db)
 	messageService := service.NewMessageService(messageRepository)
-	srvHandler := handler.NewServer(chatService, identityService, sessionService, messageService, cfg.Identity, log).Handler()
+	turnLeaseRepository := store.NewPostgresTurnLeaseRepository(db)
+	turnLeaseService := service.NewTurnLeaseService(turnLeaseRepository)
+	srvHandler := handler.NewServer(chatService, identityService, sessionService, messageService, turnLeaseService, cfg.Identity, log).Handler()
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTP.Port,
 		Handler:           srvHandler,

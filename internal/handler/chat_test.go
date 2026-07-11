@@ -45,6 +45,26 @@ func (r *handlerMessageRepository) LoadRecent(_ context.Context, _, _ string, _ 
 	return r.history, nil
 }
 
+type handlerTurnLeaseRepository struct {
+	acquireResult service.AcquireTurnLeaseResult
+	acquireErr    error
+	releaseErr    error
+	acquireCalls  int
+	releaseCalls  int
+	lastRelease   service.ReleaseTurnLeaseRequest
+}
+
+func (r *handlerTurnLeaseRepository) Acquire(_ context.Context, _ service.AcquireTurnLeaseRequest) (service.AcquireTurnLeaseResult, error) {
+	r.acquireCalls++
+	return r.acquireResult, r.acquireErr
+}
+
+func (r *handlerTurnLeaseRepository) Release(_ context.Context, request service.ReleaseTurnLeaseRequest) error {
+	r.releaseCalls++
+	r.lastRelease = request
+	return r.releaseErr
+}
+
 type handlerChatModel struct {
 	calls    int
 	messages []llm.Message
@@ -151,7 +171,8 @@ func TestChatStreamHandlerSendsErrorInsteadOfDoneWhenAssistantPersistenceFails(t
 		},
 		assistantErr: errors.New("database unavailable"),
 	}
-	server := newChatHandlerTestServer(messageRepository, &handlerChatModel{})
+	turnLeaseRepository := &handlerTurnLeaseRepository{acquireResult: service.AcquireTurnLeaseResult{Acquired: true}}
+	server := newChatHandlerTestServerWithLease(messageRepository, &handlerChatModel{}, turnLeaseRepository)
 
 	recorder := performChatRequest(server, `{
 		"session_id":"session_0123456789abcdef0123456789abcdef",
@@ -165,17 +186,84 @@ func TestChatStreamHandlerSendsErrorInsteadOfDoneWhenAssistantPersistenceFails(t
 	if strings.Contains(recorder.Body.String(), "event: done") {
 		t.Fatalf("body = %q, must not contain done event", recorder.Body.String())
 	}
+	// assistant 写入失败属于本轮没跑到终态，释放时必须标记为 failed 而不是 completed，
+	// 否则下一个重试会被误当成“已处理完成”跳过。
+	if turnLeaseRepository.releaseCalls != 1 || turnLeaseRepository.lastRelease.Status != service.TurnLeaseFailed {
+		t.Fatalf("release calls=%d status=%v, want 1 release with failed status", turnLeaseRepository.releaseCalls, turnLeaseRepository.lastRelease.Status)
+	}
+}
+
+func TestChatStreamHandlerReturnsConflictWhenTurnLeaseHeldBySomeoneElse(t *testing.T) {
+	messageRepository := &handlerMessageRepository{
+		result: service.AppendUserMessageResult{
+			Message: service.UserMessage{ID: 42},
+			Created: true,
+		},
+	}
+	chatModel := &handlerChatModel{}
+	turnLeaseRepository := &handlerTurnLeaseRepository{acquireErr: service.ErrTurnLeaseConflict}
+	server := newChatHandlerTestServerWithLease(messageRepository, chatModel, turnLeaseRepository)
+
+	recorder := performChatRequest(server, `{
+		"session_id":"session_0123456789abcdef0123456789abcdef",
+		"client_message_id":"550e8400-e29b-41d4-a716-446655440000",
+		"message":"hello"
+	}`)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusConflict, recorder.Body.String())
+	}
+	if chatModel.calls != 0 {
+		t.Fatalf("model calls = %d, want 0", chatModel.calls)
+	}
+	if turnLeaseRepository.releaseCalls != 0 {
+		t.Fatalf("release calls = %d, want 0 because the lease was never acquired", turnLeaseRepository.releaseCalls)
+	}
+}
+
+func TestChatStreamHandlerReleasesLeaseAsCompletedOnNormalSuccess(t *testing.T) {
+	messageRepository := &handlerMessageRepository{
+		result: service.AppendUserMessageResult{
+			Message: service.UserMessage{ID: 42},
+			Created: true,
+		},
+	}
+	turnLeaseRepository := &handlerTurnLeaseRepository{acquireResult: service.AcquireTurnLeaseResult{Acquired: true}}
+	server := newChatHandlerTestServerWithLease(messageRepository, &handlerChatModel{}, turnLeaseRepository)
+
+	recorder := performChatRequest(server, `{
+		"session_id":"session_0123456789abcdef0123456789abcdef",
+		"client_message_id":"550e8400-e29b-41d4-a716-446655440000",
+		"message":"hello"
+	}`)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if turnLeaseRepository.acquireCalls != 1 || turnLeaseRepository.releaseCalls != 1 {
+		t.Fatalf("acquire calls=%d release calls=%d, want 1 and 1", turnLeaseRepository.acquireCalls, turnLeaseRepository.releaseCalls)
+	}
+	if turnLeaseRepository.lastRelease.Status != service.TurnLeaseCompleted {
+		t.Fatalf("release status = %v, want completed", turnLeaseRepository.lastRelease.Status)
+	}
 }
 
 func newChatHandlerTestServer(messageRepository service.MessageRepository, chatModel service.ChatModel) *Server {
+	return newChatHandlerTestServerWithLease(messageRepository, chatModel, &handlerTurnLeaseRepository{
+		acquireResult: service.AcquireTurnLeaseResult{Acquired: true},
+	})
+}
+
+func newChatHandlerTestServerWithLease(messageRepository service.MessageRepository, chatModel service.ChatModel, turnLeaseRepository service.TurnLeaseRepository) *Server {
 	sessionRepository := &handlerSessionRepository{owners: map[string]string{
 		"session_0123456789abcdef0123456789abcdef": "usr_owner",
 	}}
 	return &Server{
-		chat:     service.NewChatService(chatModel),
-		sessions: service.NewSessionService(sessionRepository),
-		messages: service.NewMessageService(messageRepository),
-		log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		chat:       service.NewChatService(chatModel),
+		sessions:   service.NewSessionService(sessionRepository),
+		messages:   service.NewMessageService(messageRepository),
+		turnLeases: service.NewTurnLeaseService(turnLeaseRepository),
+		log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 }
 
