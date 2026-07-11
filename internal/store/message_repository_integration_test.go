@@ -165,8 +165,9 @@ func TestPostgresMessageRepositoryLoadsRecentCompletedHistory(t *testing.T) {
 	defer pool.Close()
 
 	const (
-		userID    = "usr_message_history_test"
-		sessionID = "session_00000000000000000000000000000074"
+		userID         = "usr_message_history_test"
+		sessionID      = "session_00000000000000000000000000000074"
+		deletedSession = "session_00000000000000000000000000000076"
 	)
 	ctx := context.Background()
 	cleanupMessageRepositoryTest(t, pool, userID)
@@ -178,8 +179,8 @@ func TestPostgresMessageRepositoryLoadsRecentCompletedHistory(t *testing.T) {
 		t.Fatalf("insert history user: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO agent_memory_session (session_id, user_id)
-		VALUES ($1, $2)`, sessionID, userID); err != nil {
+		INSERT INTO agent_memory_session (session_id, user_id, deleted_at)
+		VALUES ($1, $3, NULL), ($2, $3, now())`, sessionID, deletedSession, userID); err != nil {
 		t.Fatalf("insert history session: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
@@ -191,7 +192,8 @@ func TestPostgresMessageRepositoryLoadsRecentCompletedHistory(t *testing.T) {
 			($1, $2, 'health-agent', 3, 'system',    'completed', 'hidden system',     NULL),
 			($1, $2, 'health-agent', 4, 'user',      'failed',    'hidden failed',     NULL),
 			($1, $2, 'health-agent', 5, 'assistant', 'completed', 'hidden deleted',    now()),
-			($1, $2, 'health-agent', 6, 'user',      'completed', 'latest user',       NULL)`, sessionID, userID); err != nil {
+			($1, $2, 'health-agent', 6, 'user',      'completed', 'latest user',       NULL),
+			($3, $2, 'health-agent', 1, 'user',      'completed', 'hidden session',    NULL)`, sessionID, userID, deletedSession); err != nil {
 		t.Fatalf("insert history fixtures: %v", err)
 	}
 
@@ -218,6 +220,40 @@ func TestPostgresMessageRepositoryLoadsRecentCompletedHistory(t *testing.T) {
 	}
 	if len(foreignHistory) != 0 {
 		t.Fatalf("LoadRecent() foreign = %+v, want empty", foreignHistory)
+	}
+
+	messages, err := store.NewPostgresMessageRepository(pool).ListMessages(ctx, userID, sessionID)
+	if err != nil {
+		t.Fatalf("ListMessages() error = %v", err)
+	}
+	wantMessages := []service.SessionMessage{
+		{Role: "user", Content: "old user", Seq: 1},
+		{Role: "assistant", Content: "old assistant", Seq: 2},
+		{Role: "user", Content: "latest user", Seq: 6},
+	}
+	if len(messages) != len(wantMessages) {
+		t.Fatalf("ListMessages() = %+v, want %+v", messages, wantMessages)
+	}
+	for index, wantMessage := range wantMessages {
+		if messages[index].Role != wantMessage.Role || messages[index].Content != wantMessage.Content || messages[index].Seq != wantMessage.Seq {
+			t.Fatalf("ListMessages()[%d] = %+v, want role=%q content=%q seq=%d", index, messages[index], wantMessage.Role, wantMessage.Content, wantMessage.Seq)
+		}
+	}
+
+	foreignMessages, err := store.NewPostgresMessageRepository(pool).ListMessages(ctx, "usr_other", sessionID)
+	if err != nil {
+		t.Fatalf("ListMessages() foreign error = %v", err)
+	}
+	if len(foreignMessages) != 0 {
+		t.Fatalf("ListMessages() foreign = %+v, want empty", foreignMessages)
+	}
+
+	deletedSessionMessages, err := store.NewPostgresMessageRepository(pool).ListMessages(ctx, userID, deletedSession)
+	if err != nil {
+		t.Fatalf("ListMessages() deleted session error = %v", err)
+	}
+	if len(deletedSessionMessages) != 0 {
+		t.Fatalf("ListMessages() deleted session = %+v, want empty", deletedSessionMessages)
 	}
 }
 

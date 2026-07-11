@@ -239,6 +239,42 @@ func (r *PostgresMessageRepository) FindAssistantReplyByID(ctx context.Context, 
 	return message, true, nil
 }
 
+// ListMessages 按 seq 升序返回该会话已完成、未删除的 user/assistant 消息，供"切换会话后
+// 加载完整历史"这个场景使用。userID 是调用方已经校验过归属的可信用户，这里的 WHERE 条件
+// 再带一层 user_id 过滤，是防止上层校验被绕过的第二道防线，不是唯一防线。
+func (r *PostgresMessageRepository) ListMessages(ctx context.Context, userID, sessionID string) ([]service.SessionMessage, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT message.id, message.role, COALESCE(message.content, ''), message.seq, message.created_at
+		FROM agent_memory_episodic AS message
+		JOIN agent_memory_session AS session
+		  ON session.session_id = message.session_id
+		 AND session.user_id = message.user_id
+		WHERE message.user_id = $1
+		  AND message.session_id = $2
+		  AND session.deleted_at IS NULL
+		  AND message.status = 'completed'
+		  AND message.deleted_at IS NULL
+		  AND message.role IN ('user', 'assistant')
+		ORDER BY message.seq ASC`, userID, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("查询会话消息失败: %w", err)
+	}
+	defer rows.Close()
+
+	messages := make([]service.SessionMessage, 0)
+	for rows.Next() {
+		var message service.SessionMessage
+		if err := rows.Scan(&message.ID, &message.Role, &message.Content, &message.Seq, &message.CreatedAt); err != nil {
+			return nil, fmt.Errorf("扫描会话消息失败: %w", err)
+		}
+		messages = append(messages, message)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历会话消息失败: %w", err)
+	}
+	return messages, nil
+}
+
 func scanUserMessage(row pgx.Row) (service.UserMessage, error) {
 	var message service.UserMessage
 	err := row.Scan(

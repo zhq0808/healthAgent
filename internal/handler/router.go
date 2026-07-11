@@ -68,6 +68,8 @@ func (s *Server) routes() {
 		protected := v1.Group("")
 		protected.Use(authMiddleware(s.identity, s.identityConfig.GuestCookieName, s.log))
 		protected.POST("/sessions", s.createSessionHandler)
+		protected.GET("/sessions", s.listSessionsHandler)
+		protected.GET("/sessions/:session_id/messages", s.listSessionMessagesHandler)
 		protected.POST("/chat/stream", s.chatStreamHandler)
 	}
 }

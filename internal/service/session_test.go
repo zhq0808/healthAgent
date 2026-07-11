@@ -11,6 +11,11 @@ type fakeSessionRepository struct {
 	owners          map[string]string
 	createCalls     int
 	forcedCollision int
+	listResult      []SessionListItem
+	listErr         error
+	listCalls       int
+	lastListUserID  string
+	lastListLimit   int
 }
 
 func newFakeSessionRepository() *fakeSessionRepository {
@@ -30,8 +35,19 @@ func (r *fakeSessionRepository) CreateSession(_ context.Context, userID, session
 	return true, nil
 }
 
+func (r *fakeSessionRepository) OwnsSession(_ context.Context, userID, sessionID string) (bool, error) {
+	return r.owners[sessionID] == userID, nil
+}
+
 func (r *fakeSessionRepository) OwnsActiveSession(_ context.Context, userID, sessionID string) (bool, error) {
 	return r.owners[sessionID] == userID, nil
+}
+
+func (r *fakeSessionRepository) ListSessions(_ context.Context, userID string, limit int) ([]SessionListItem, error) {
+	r.listCalls++
+	r.lastListUserID = userID
+	r.lastListLimit = limit
+	return r.listResult, r.listErr
 }
 
 func TestSessionServiceCreatesAndValidatesOwnedSession(t *testing.T) {
@@ -65,5 +81,35 @@ func TestSessionServiceRetriesCollision(t *testing.T) {
 	}
 	if repository.createCalls != 2 {
 		t.Fatalf("CreateSession() calls = %d, want 2", repository.createCalls)
+	}
+}
+
+func TestSessionServiceListPassesUserIDAndDefaultLimit(t *testing.T) {
+	repository := newFakeSessionRepository()
+	repository.listResult = []SessionListItem{{SessionID: "session_a"}, {SessionID: "session_b"}}
+	sessionService := NewSessionService(repository)
+
+	items, err := sessionService.List(context.Background(), "usr_a")
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("List() = %+v, want 2 items", items)
+	}
+	if repository.lastListUserID != "usr_a" {
+		t.Fatalf("queried userID = %q, want usr_a", repository.lastListUserID)
+	}
+	if repository.lastListLimit != defaultSessionListLimit {
+		t.Fatalf("queried limit = %d, want default %d", repository.lastListLimit, defaultSessionListLimit)
+	}
+}
+
+func TestSessionServiceListPropagatesRepositoryError(t *testing.T) {
+	repository := newFakeSessionRepository()
+	repository.listErr = errors.New("database unavailable")
+	sessionService := NewSessionService(repository)
+
+	if _, err := sessionService.List(context.Background(), "usr_a"); err == nil {
+		t.Fatal("List() error = nil, want propagated repository error")
 	}
 }

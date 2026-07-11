@@ -65,6 +65,15 @@ type ConversationMessage struct {
 	Content string
 }
 
+// SessionMessage 是「按会话读消息」接口返回的一条消息，只暴露前端渲染需要的字段。
+type SessionMessage struct {
+	ID        int64
+	Role      string
+	Content   string
+	Seq       int
+	CreatedAt time.Time
+}
+
 // MessageRepository 是消息服务当前需要的最小持久化能力。
 type MessageRepository interface {
 	AppendUserMessage(ctx context.Context, request AppendUserMessageRequest) (AppendUserMessageResult, error)
@@ -73,6 +82,9 @@ type MessageRepository interface {
 	// FindAssistantReplyByID 按 turn 保存的结果消息 ID 查已完成的 assistant 回复。
 	// 找不到时返回 (zero, false, nil)，不算错误。
 	FindAssistantReplyByID(ctx context.Context, userID, sessionID string, messageID int64) (AssistantMessage, bool, error)
+	// ListMessages 按 seq 升序返回该会话已完成、未删除的 user/assistant 消息；
+	// userID 由调用方传入可信身份，查询本身也按归属过滤（跟上层的会话归属校验形成双重保险）。
+	ListMessages(ctx context.Context, userID, sessionID string) ([]SessionMessage, error)
 }
 
 // MessageService 编排消息持久化和幂等语义。
@@ -116,4 +128,11 @@ func (s *MessageService) FindReplyForTurn(ctx context.Context, userID, sessionID
 		return AssistantMessage{}, false, nil
 	}
 	return s.repository.FindAssistantReplyByID(ctx, userID, sessionID, resultMessageID)
+}
+
+// ListMessages 返回指定会话内已完成、未删除的 user/assistant 消息，按 seq 升序排列，
+// 供「多 Session 切换后加载历史」这个场景使用。调用方必须先校验过会话归属
+// （例如 SessionService.RequireOwned），这里的 userID 只是再加一层过滤，不是唯一防线。
+func (s *MessageService) ListMessages(ctx context.Context, userID, sessionID string) ([]SessionMessage, error) {
+	return s.repository.ListMessages(ctx, userID, sessionID)
 }

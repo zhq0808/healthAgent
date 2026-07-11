@@ -30,6 +30,8 @@ type handlerMessageRepository struct {
 	replyFound       bool
 	replyErr         error
 	findReplyCalls   int
+	sessionMessages  []service.SessionMessage
+	listMessagesErr  error
 }
 
 func (r *handlerMessageRepository) AppendUserMessage(_ context.Context, request service.AppendUserMessageRequest) (service.AppendUserMessageResult, error) {
@@ -52,6 +54,10 @@ func (r *handlerMessageRepository) LoadRecent(_ context.Context, _, _ string, _ 
 func (r *handlerMessageRepository) FindAssistantReplyByID(_ context.Context, _, _ string, _ int64) (service.AssistantMessage, bool, error) {
 	r.findReplyCalls++
 	return r.reply, r.replyFound, r.replyErr
+}
+
+func (r *handlerMessageRepository) ListMessages(_ context.Context, _, _ string) ([]service.SessionMessage, error) {
+	return r.sessionMessages, r.listMessagesErr
 }
 
 type handlerTurnLeaseRepository struct {
@@ -95,6 +101,7 @@ type handlerChatModel struct {
 	calls     int
 	messages  []llm.Message
 	streamErr error
+	noDelta   bool // 模拟模型什么都没产出就正常结束（空回复），不调用 onDelta。
 }
 
 func (m *handlerChatModel) Timeout() time.Duration {
@@ -107,7 +114,27 @@ func (m *handlerChatModel) Stream(_ context.Context, messages []llm.Message, onD
 	if m.streamErr != nil {
 		return m.streamErr
 	}
+	if m.noDelta {
+		return nil
+	}
 	return onDelta("reply")
+}
+
+// brokenAfterNWriter 包一层 gin.ResponseWriter，模拟客户端在前 N 次写入成功后就断开连接——
+// 之后所有 WriteString 都失败，用来验证 handler 在写失败时能正确收尾（释放租约为
+// failed），不会 panic，也不会误当成成功。
+type brokenAfterNWriter struct {
+	gin.ResponseWriter
+	allowedWrites int
+	writes        int
+}
+
+func (w *brokenAfterNWriter) WriteString(s string) (int, error) {
+	w.writes++
+	if w.writes > w.allowedWrites {
+		return 0, errors.New("simulated client disconnect")
+	}
+	return w.ResponseWriter.WriteString(s)
 }
 
 func TestChatStreamHandlerBeginsAndCompletesTurnAroundModelCall(t *testing.T) {
@@ -439,6 +466,72 @@ func TestChatStreamHandlerSendsErrorWhenFallbackReplyPersistenceFails(t *testing
 	}
 }
 
+// 空回复：模型这一轮什么都没吐（没有任何 onDelta 调用），最终内容是空字符串。
+// TurnLeaseService.Complete 会在真正写库前就拒绝空内容，这里验证 handler 把这个拒绝正确
+// 转成 error 事件（不发 done），并把这个 turn 释放为 failed——不能往历史里存一条空的 assistant 消息。
+func TestChatStreamHandlerFailsTurnWhenModelProducesEmptyReply(t *testing.T) {
+	messageRepository := &handlerMessageRepository{
+		result: service.AppendUserMessageResult{
+			Message: service.UserMessage{ID: 42},
+			Created: true,
+		},
+	}
+	chatModel := &handlerChatModel{noDelta: true}
+	turnLeaseRepository := &handlerTurnLeaseRepository{acquireResult: service.AcquireTurnLeaseResult{Acquired: true}}
+	server := newChatHandlerTestServerWithLease(messageRepository, chatModel, turnLeaseRepository)
+
+	recorder := performChatRequest(server, `{
+		"session_id":"session_0123456789abcdef0123456789abcdef",
+		"client_message_id":"550e8400-e29b-41d4-a716-446655440000",
+		"message":"hello"
+	}`)
+
+	if !strings.Contains(recorder.Body.String(), "event: error") {
+		t.Fatalf("body = %q, want error event", recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "event: done") {
+		t.Fatalf("body = %q, must not contain done event", recorder.Body.String())
+	}
+	if turnLeaseRepository.completeCalls != 0 {
+		t.Fatalf("complete calls = %d, want 0: empty content must be rejected before reaching the repository", turnLeaseRepository.completeCalls)
+	}
+	if turnLeaseRepository.releaseCalls != 1 || turnLeaseRepository.lastRelease.Status != service.TurnLeaseFailed {
+		t.Fatalf("release calls=%d status=%v, want 1 release with failed status", turnLeaseRepository.releaseCalls, turnLeaseRepository.lastRelease.Status)
+	}
+}
+
+// 客户端断开：不是模型报错，而是往连接写数据本身失败（brokenAfterNWriter 模拟）。
+// 验证这条真实的断开路径也会被正确兜住：不 panic，不落库，把这个 turn 释放为 failed。
+func TestChatStreamHandlerFailsTurnWhenClientDisconnectsMidStream(t *testing.T) {
+	messageRepository := &handlerMessageRepository{
+		result: service.AppendUserMessageResult{
+			Message: service.UserMessage{ID: 42},
+			Created: true,
+		},
+	}
+	chatModel := &handlerChatModel{}
+	turnLeaseRepository := &handlerTurnLeaseRepository{acquireResult: service.AcquireTurnLeaseResult{Acquired: true}}
+	server := newChatHandlerTestServerWithLease(messageRepository, chatModel, turnLeaseRepository)
+
+	performChatRequestWithWriter(server, `{
+		"session_id":"session_0123456789abcdef0123456789abcdef",
+		"client_message_id":"550e8400-e29b-41d4-a716-446655440000",
+		"message":"hello"
+	}`, func(w gin.ResponseWriter) gin.ResponseWriter {
+		return &brokenAfterNWriter{ResponseWriter: w, allowedWrites: 0}
+	})
+
+	if chatModel.calls != 1 {
+		t.Fatalf("model calls = %d, want 1: the handler still attempts the model call before the write fails", chatModel.calls)
+	}
+	if turnLeaseRepository.completeCalls != 0 {
+		t.Fatalf("complete calls = %d, want 0: a disconnected client must not be persisted as a completed reply", turnLeaseRepository.completeCalls)
+	}
+	if turnLeaseRepository.releaseCalls != 1 || turnLeaseRepository.lastRelease.Status != service.TurnLeaseFailed {
+		t.Fatalf("release calls=%d status=%v, want 1 release with failed status", turnLeaseRepository.releaseCalls, turnLeaseRepository.lastRelease.Status)
+	}
+}
+
 func newChatHandlerTestServer(messageRepository service.MessageRepository, chatModel service.ChatModel) *Server {
 	return newChatHandlerTestServerWithLease(messageRepository, chatModel, &handlerTurnLeaseRepository{
 		acquireResult: service.AcquireTurnLeaseResult{Acquired: true},
@@ -459,6 +552,12 @@ func newChatHandlerTestServerWithLease(messageRepository service.MessageReposito
 }
 
 func performChatRequest(server *Server, body string) *httptest.ResponseRecorder {
+	return performChatRequestWithWriter(server, body, nil)
+}
+
+// performChatRequestWithWriter 允许在调用 handler 前插入一层自定义 ResponseWriter（比如
+// brokenAfterNWriter），用于模拟客户端中途断开连接。wrap 为 nil 时行为与原来一致。
+func performChatRequestWithWriter(server *Server, body string, wrap func(gin.ResponseWriter) gin.ResponseWriter) *httptest.ResponseRecorder {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ginContext, _ := gin.CreateTestContext(recorder)
@@ -466,6 +565,9 @@ func performChatRequest(server *Server, body string) *httptest.ResponseRecorder 
 	request.Header.Set("Content-Type", "application/json")
 	request = request.WithContext(context.WithValue(request.Context(), userIDKey, "usr_owner"))
 	ginContext.Request = request
+	if wrap != nil {
+		ginContext.Writer = wrap(ginContext.Writer)
+	}
 	server.chatStreamHandler(ginContext)
 	return recorder
 }

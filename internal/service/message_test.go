@@ -13,6 +13,7 @@ type fakeMessageRepository struct {
 	reply           AssistantMessage
 	replyFound      bool
 	lastFindReplyID int64
+	sessionMessages []SessionMessage
 	err             error
 }
 
@@ -31,6 +32,10 @@ func (r *fakeMessageRepository) LoadRecent(_ context.Context, _, _ string, _ int
 func (r *fakeMessageRepository) FindAssistantReplyByID(_ context.Context, _, _ string, messageID int64) (AssistantMessage, bool, error) {
 	r.lastFindReplyID = messageID
 	return r.reply, r.replyFound, r.err
+}
+
+func (r *fakeMessageRepository) ListMessages(_ context.Context, _, _ string) ([]SessionMessage, error) {
+	return r.sessionMessages, r.err
 }
 
 func TestMessageServiceReturnsIdempotentExistingMessage(t *testing.T) {
@@ -108,5 +113,29 @@ func TestMessageServiceFindReplyForTurnReportsNotFound(t *testing.T) {
 	}
 	if found {
 		t.Fatal("FindReplyForTurn() found = true, want false")
+	}
+}
+
+func TestMessageServiceListMessagesReturnsRepositoryResult(t *testing.T) {
+	repository := &fakeMessageRepository{sessionMessages: []SessionMessage{
+		{ID: 1, Role: "user", Content: "hi", Seq: 1},
+		{ID: 2, Role: "assistant", Content: "hello", Seq: 2},
+	}}
+	messageService := NewMessageService(repository)
+
+	messages, err := messageService.ListMessages(t.Context(), "usr_owner", "session_owner")
+	if err != nil {
+		t.Fatalf("ListMessages() error = %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("ListMessages() = %+v, want 2 messages", messages)
+	}
+}
+
+func TestMessageServiceListMessagesPropagatesRepositoryError(t *testing.T) {
+	messageService := NewMessageService(&fakeMessageRepository{err: errors.New("database unavailable")})
+
+	if _, err := messageService.ListMessages(t.Context(), "usr_owner", "session_owner"); err == nil {
+		t.Fatal("ListMessages() error = nil, want propagated repository error")
 	}
 }
