@@ -214,6 +214,8 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 			UserMessageID:   leaseResult.UserMessage.ID,
 			Content:         content,
 			TraceID:         TraceIDFromContext(c.Request.Context()),
+			PromptVersion:   s.chat.PromptVersion(),
+			ModelName:       s.chat.ModelName(),
 		}); err != nil {
 			s.log.Error("assistant 消息落库失败",
 				"trace_id", TraceIDFromContext(c.Request.Context()),

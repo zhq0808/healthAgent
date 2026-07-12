@@ -33,17 +33,21 @@ type IdentityConfig struct {
 
 // LLMConfig 目前专门给 DeepSeek 用
 type LLMConfig struct {
-	APIKey         string `yaml:"-"        env:"API_KEY"`
-	BaseURL        string `yaml:"base_url" env:"BASE_URL" env-default:"https://api.deepseek.com"`
-	Model          string `yaml:"model"    env:"MODEL"    env-default:"deepseek-chat"`
-	TimeoutSeconds int    `yaml:"timeout"  env:"TIMEOUT"  env-default:"30"`
+	APIKey         string  `yaml:"-"        env:"API_KEY"`
+	BaseURL        string  `yaml:"base_url" env:"BASE_URL" env-default:"https://api.deepseek.com"`
+	Model          string  `yaml:"model"    env:"MODEL"    env-default:"deepseek-chat"`
+	Temperature    float64 `yaml:"temperature" env:"TEMPERATURE" env-default:"0"`
+	TimeoutSeconds int     `yaml:"timeout"  env:"TIMEOUT"  env-default:"30"`
 }
 
 // ChatConfig 控制聊天业务层（不是 LLM 传输层）的行为。
 type ChatConfig struct {
 	// MaxReplyChars 是单条 assistant 回复累积的最大字符数上限，防止模型异常时（例如陷入重复输出）
 	// 无限占用内存并写入一条超大的数据库行。<=0 时回退为 service.DefaultMaxReplyChars。
-	MaxReplyChars int `yaml:"max_reply_chars" env:"MAX_REPLY_CHARS" env-default:"4000"`
+	MaxReplyChars  int    `yaml:"max_reply_chars" env:"MAX_REPLY_CHARS" env-default:"4000"`
+	PromptPath     string `yaml:"prompt_path" env:"PROMPT_PATH" env-default:"prompts/health_chat_v2.tmpl"`
+	PromptVersion  string `yaml:"prompt_version" env:"PROMPT_VERSION" env-default:"health-chat-v2"`
+	SafetyBoundary string `yaml:"safety_boundary" env:"SAFETY_BOUNDARY" env-default:"健康建议仅供一般信息参考，不能替代医生面诊、诊断或治疗。"`
 }
 
 // OpenAIConfig 是你后续新增的 OpenAI 配置

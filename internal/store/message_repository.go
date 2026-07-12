@@ -150,9 +150,12 @@ func appendAssistantMessageTx(ctx context.Context, tx pgx.Tx, request service.Ap
 	message, err := scanAssistantMessage(tx.QueryRow(ctx, `
 		INSERT INTO agent_memory_episodic (
 			session_id, user_id, agent_id, seq, parent_id, role, status,
-			content, trace_id
+			content, trace_id, meta_data
 		)
-		VALUES ($1, $2, $3, $4, NULLIF($5, 0), 'assistant', 'completed', $6, $7)
+		VALUES (
+			$1, $2, $3, $4, NULLIF($5, 0), 'assistant', 'completed', $6, $7,
+			jsonb_build_object('prompt_version', $8::text, 'model', $9::text)
+		)
 		RETURNING id, user_id, session_id, seq,
 		          COALESCE(content, ''), COALESCE(trace_id, ''), created_at`,
 		request.SessionID,
@@ -162,6 +165,8 @@ func appendAssistantMessageTx(ctx context.Context, tx pgx.Tx, request service.Ap
 		request.ParentID,
 		request.Content,
 		request.TraceID,
+		request.PromptVersion,
+		request.ModelName,
 	))
 	if err != nil {
 		return service.AssistantMessage{}, fmt.Errorf("写入 assistant 消息失败: %w", err)

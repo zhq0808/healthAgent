@@ -52,7 +52,11 @@ func run() error {
 	if cfg.DeepSeek.APIKey == "" {
 		log.Warn("未配置 DEEPSEEK_API_KEY，对话将返回降级兜底回复（请在 .env 中填入）")
 	}
-	client := llm.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL, cfg.DeepSeek.Model, time.Duration(cfg.DeepSeek.TimeoutSeconds)*time.Second)
+	client := llm.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL, cfg.DeepSeek.Model, cfg.DeepSeek.Temperature, time.Duration(cfg.DeepSeek.TimeoutSeconds)*time.Second)
+	prompt, err := service.LoadChatPrompt(cfg.Chat.PromptPath, cfg.Chat.PromptVersion, cfg.Chat.SafetyBoundary)
+	if err != nil {
+		return err
+	}
 
 	// 3.1 初始化 PostgreSQL（对话历史 source of truth）。连不上直接失败——不允许无存储启动。
 	db, err := store.NewPostgres(cfg.Postgres)
@@ -84,7 +88,7 @@ func run() error {
 	const writeTimeout = 60 * time.Second
 
 	// 4. 在 composition root 组装业务服务；HTTP handler 只依赖 service。
-	chatService := service.NewChatService(client, cfg.Chat.MaxReplyChars)
+	chatService := service.NewChatService(client, prompt, cfg.Chat.MaxReplyChars)
 	identityRepository := store.NewPostgresIdentityRepository(db)
 	identityService := service.NewIdentityService(identityRepository, time.Duration(cfg.Identity.GuestTokenTTLHours)*time.Hour)
 	sessionRepository := store.NewPostgresSessionRepository(db)

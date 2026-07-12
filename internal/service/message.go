@@ -40,11 +40,13 @@ type AppendUserMessageResult struct {
 
 // AppendAssistantMessageRequest 是写入完整模型回复所需的可信数据。
 type AppendAssistantMessageRequest struct {
-	UserID    string
-	SessionID string
-	ParentID  int64
-	Content   string
-	TraceID   string
+	UserID        string
+	SessionID     string
+	ParentID      int64
+	Content       string
+	TraceID       string
+	PromptVersion string
+	ModelName     string
 }
 
 // AssistantMessage 是已持久化的模型回复。

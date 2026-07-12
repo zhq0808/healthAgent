@@ -73,6 +73,8 @@ type CompleteTurnRequest struct {
 	UserMessageID   int64
 	Content         string
 	TraceID         string
+	PromptVersion   string
+	ModelName       string
 }
 
 // ReleaseTurnLeaseRequest 是释放（结束）一个 turn 租约所需的信息。

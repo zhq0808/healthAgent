@@ -108,6 +108,8 @@ func (m *handlerChatModel) Timeout() time.Duration {
 	return time.Second
 }
 
+func (m *handlerChatModel) ModelName() string { return "handler-test-model" }
+
 func (m *handlerChatModel) Stream(_ context.Context, messages []llm.Message, onDelta func(string) error) error {
 	m.calls++
 	m.messages = messages
@@ -172,7 +174,9 @@ func TestChatStreamHandlerBeginsAndCompletesTurnAroundModelCall(t *testing.T) {
 		t.Fatalf("model messages=%+v, want system plus ordered history", chatModel.messages)
 	}
 	if turnLeaseRepository.completeCalls != 1 || turnLeaseRepository.lastComplete.UserMessageID != 42 ||
-		turnLeaseRepository.lastComplete.Content != "reply" {
+		turnLeaseRepository.lastComplete.Content != "reply" ||
+		turnLeaseRepository.lastComplete.PromptVersion != "handler-test-v2" ||
+		turnLeaseRepository.lastComplete.ModelName != "handler-test-model" {
 		t.Fatalf("complete calls=%d request=%+v", turnLeaseRepository.completeCalls, turnLeaseRepository.lastComplete)
 	}
 }
@@ -542,8 +546,16 @@ func newChatHandlerTestServerWithLease(messageRepository service.MessageReposito
 	sessionRepository := &handlerSessionRepository{owners: map[string]string{
 		"session_0123456789abcdef0123456789abcdef": "usr_owner",
 	}}
+	prompt, err := service.ParseChatPrompt(
+		"版本={{.Version}} 安全={{.SafetyBoundary}} 特征={{.UserProfileSummary}}",
+		"handler-test-v2",
+		"测试安全边界",
+	)
+	if err != nil {
+		panic(err)
+	}
 	return &Server{
-		chat:       service.NewChatService(chatModel, service.DefaultMaxReplyChars),
+		chat:       service.NewChatService(chatModel, prompt, service.DefaultMaxReplyChars),
 		sessions:   service.NewSessionService(sessionRepository),
 		messages:   service.NewMessageService(messageRepository),
 		turnLeases: service.NewTurnLeaseService(turnLeaseRepository),

@@ -20,27 +20,33 @@ import (
 //
 // 并发安全：底层 http.Client 可被多个 goroutine 共用，DeepSeekClient 自身无可变状态。
 type DeepSeekClient struct {
-	apiKey  string
-	baseURL string
-	model   string
-	timeout time.Duration
-	http    *http.Client
+	apiKey      string
+	baseURL     string
+	model       string
+	temperature float64
+	timeout     time.Duration
+	http        *http.Client
 }
 
 // NewDeepSeekClient 构造 DeepSeek 客户端。timeout 为单次请求超时上限，同时作为兜底硬超时挂在 http.Client 上。
-func NewDeepSeekClient(apiKey, baseURL, model string, timeout time.Duration) *DeepSeekClient {
+func NewDeepSeekClient(apiKey, baseURL, model string, temperature float64, timeout time.Duration) *DeepSeekClient {
 	return &DeepSeekClient{
-		apiKey:  apiKey,
-		baseURL: strings.TrimRight(baseURL, "/"),
-		model:   model,
-		timeout: timeout,
-		http:    &http.Client{Timeout: timeout},
+		apiKey:      apiKey,
+		baseURL:     strings.TrimRight(baseURL, "/"),
+		model:       model,
+		temperature: temperature,
+		timeout:     timeout,
+		http:        &http.Client{Timeout: timeout},
 	}
 }
 
 // Timeout 返回单次调用的超时上限，供调用方构造带 deadline 的 context。
 func (c *DeepSeekClient) Timeout() time.Duration {
 	return c.timeout
+}
+
+func (c *DeepSeekClient) ModelName() string {
+	return c.model
 }
 
 // Stream 以流式方式调用大模型：DeepSeek 每生成一段文本就回调 onDelta。
@@ -53,9 +59,10 @@ func (c *DeepSeekClient) Stream(ctx context.Context, messages []Message, onDelta
 	}
 
 	body, err := json.Marshal(chatCompletionRequest{
-		Model:    c.model,
-		Messages: messages,
-		Stream:   true,
+		Model:       c.model,
+		Messages:    messages,
+		Stream:      true,
+		Temperature: c.temperature,
 	})
 	if err != nil {
 		return fmt.Errorf("序列化请求失败: %w", err)

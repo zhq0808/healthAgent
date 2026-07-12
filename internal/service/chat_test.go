@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,9 +16,28 @@ type fakeChatModel struct {
 	messages []llm.Message
 }
 
+func testChatPrompt(t *testing.T) *ChatPrompt {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "chat.tmpl")
+	templateText := `版本={{.Version}}
+安全={{.SafetyBoundary}}
+特征={{.UserProfileSummary}}
+你是健康管家。安全约束 > 已确认用户特征 > 当前问题 > 最近会话历史。`
+	if err := os.WriteFile(path, []byte(templateText), 0o600); err != nil {
+		t.Fatalf("write prompt template: %v", err)
+	}
+	prompt, err := LoadChatPrompt(path, "test-v2", "禁止诊断和处方")
+	if err != nil {
+		t.Fatalf("LoadChatPrompt() error = %v", err)
+	}
+	return prompt
+}
+
 func (f *fakeChatModel) Timeout() time.Duration {
 	return time.Second
 }
+
+func (f *fakeChatModel) ModelName() string { return "fake-model" }
 
 func (f *fakeChatModel) Stream(_ context.Context, messages []llm.Message, onDelta func(string) error) error {
 	f.messages = messages
@@ -25,7 +46,7 @@ func (f *fakeChatModel) Stream(_ context.Context, messages []llm.Message, onDelt
 
 func TestChatServiceStreamBuildsMessages(t *testing.T) {
 	model := &fakeChatModel{}
-	chatService := NewChatService(model, DefaultMaxReplyChars)
+	chatService := NewChatService(model, testChatPrompt(t), DefaultMaxReplyChars)
 	var reply string
 	history := []ConversationMessage{
 		{Seq: 1, Role: "user", Content: "my name is Alice"},
@@ -49,11 +70,13 @@ func TestChatServiceStreamBuildsMessages(t *testing.T) {
 	if len(model.messages) != 4 {
 		t.Fatalf("message count = %d, want 4", len(model.messages))
 	}
-	if model.messages[0].Role != "system" || model.messages[0].Content != systemPrompt {
+	if model.messages[0].Role != "system" {
 		t.Fatalf("system message = %#v", model.messages[0])
 	}
-	if !strings.Contains(model.messages[0].Content, "健康管家") {
-		t.Fatalf("system prompt does not define the health assistant role: %q", model.messages[0].Content)
+	for _, required := range []string{"test-v2", "禁止诊断和处方", noConfirmedUserProfile, "健康管家"} {
+		if !strings.Contains(model.messages[0].Content, required) {
+			t.Fatalf("system prompt missing %q: %q", required, model.messages[0].Content)
+		}
 	}
 	if strings.Contains(model.messages[0].Content, "Intent Categories") || strings.Contains(model.messages[0].Content, "Strict JSON") {
 		t.Fatalf("chat system prompt contains intent-classifier instructions: %q", model.messages[0].Content)
@@ -74,6 +97,7 @@ type sequencedChatModel struct {
 }
 
 func (m *sequencedChatModel) Timeout() time.Duration { return time.Second }
+func (m *sequencedChatModel) ModelName() string      { return "sequenced-model" }
 
 func (m *sequencedChatModel) Stream(_ context.Context, _ []llm.Message, onDelta func(string) error) error {
 	for _, delta := range m.deltas {
@@ -86,7 +110,7 @@ func (m *sequencedChatModel) Stream(_ context.Context, _ []llm.Message, onDelta 
 
 func TestChatServiceStreamTruncatesLongReplyWithoutTreatingItAsFailure(t *testing.T) {
 	model := &sequencedChatModel{deltas: []string{"12345", "67890", "abcde"}}
-	chatService := NewChatService(model, 5) // 上限 5 个字符，第一段刚好用完
+	chatService := NewChatService(model, testChatPrompt(t), 5) // 上限 5 个字符，第一段刚好用完
 
 	var forwarded []string
 	content, err := chatService.Stream(context.Background(), nil, func(delta string) error {
@@ -109,7 +133,7 @@ func TestChatServiceStreamTruncatesLongReplyWithoutTreatingItAsFailure(t *testin
 
 func TestChatServiceStreamCountsUnicodeCharactersAndTrimsOversizedDelta(t *testing.T) {
 	model := &sequencedChatModel{deltas: []string{"你好世界"}}
-	chatService := NewChatService(model, 2)
+	chatService := NewChatService(model, testChatPrompt(t), 2)
 
 	var forwarded []string
 	content, err := chatService.Stream(context.Background(), nil, func(delta string) error {
@@ -130,7 +154,7 @@ func TestChatServiceStreamCountsUnicodeCharactersAndTrimsOversizedDelta(t *testi
 func TestChatServiceStreamPropagatesRealModelErrorWithPartialContent(t *testing.T) {
 	wantErr := errors.New("upstream failed")
 	model := &sequencedChatModel{deltas: []string{"partial"}, streamErr: wantErr}
-	chatService := NewChatService(model, DefaultMaxReplyChars)
+	chatService := NewChatService(model, testChatPrompt(t), DefaultMaxReplyChars)
 
 	content, err := chatService.Stream(context.Background(), nil, func(string) error { return nil })
 	if !errors.Is(err, wantErr) {
@@ -143,7 +167,7 @@ func TestChatServiceStreamPropagatesRealModelErrorWithPartialContent(t *testing.
 
 func TestNewChatServiceAppliesDefaultMaxReplyCharsWhenNotPositive(t *testing.T) {
 	model := &sequencedChatModel{deltas: []string{strings.Repeat("a", DefaultMaxReplyChars)}}
-	chatService := NewChatService(model, 0)
+	chatService := NewChatService(model, testChatPrompt(t), 0)
 
 	content, err := chatService.Stream(context.Background(), nil, func(string) error { return nil })
 	if err != nil {

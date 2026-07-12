@@ -13,9 +13,10 @@ type Message struct {
 
 // chatCompletionRequest 是 /chat/completions 请求体（仅含所需字段）。
 type chatCompletionRequest struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
-	Stream   bool      `json:"stream"`
+	Model       string    `json:"model"`
+	Messages    []Message `json:"messages"`
+	Stream      bool      `json:"stream"`
+	Temperature float64   `json:"temperature"`
 }
 
 // chatCompletionChunk 是 stream=true 时 SSE 每帧 `data:` 的结构（仅解析所需字段）。

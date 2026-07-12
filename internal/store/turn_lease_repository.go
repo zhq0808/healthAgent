@@ -231,11 +231,13 @@ func (r *PostgresTurnLeaseRepository) Complete(ctx context.Context, request serv
 	}
 
 	message, err := appendAssistantMessageTx(ctx, tx, service.AppendAssistantMessageRequest{
-		UserID:    request.UserID,
-		SessionID: request.SessionID,
-		ParentID:  request.UserMessageID,
-		Content:   request.Content,
-		TraceID:   request.TraceID,
+		UserID:        request.UserID,
+		SessionID:     request.SessionID,
+		ParentID:      request.UserMessageID,
+		Content:       request.Content,
+		TraceID:       request.TraceID,
+		PromptVersion: request.PromptVersion,
+		ModelName:     request.ModelName,
 	})
 	if err != nil {
 		return service.AssistantMessage{}, err
