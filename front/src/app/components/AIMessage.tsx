@@ -4,20 +4,21 @@ import remarkGfm from "remark-gfm";
 
 interface AIMessageProps {
   message: string;
+  time?: string;
 }
 
 // AIMessage 渲染助手回复。回复内容可能包含 markdown（加粗、有序/无序列表、链接等），
 // 用 react-markdown + remark-gfm 渲染，并通过 arbitrary variant 给嵌套元素补样式，
 // 避免额外引入 typography 插件。
 // 当内容为空（回复尚未吐字）时，显示三个主题绿色的跳动圆点作为“正在输入”指示。
-export function AIMessage({ message }: AIMessageProps) {
+export function AIMessage({ message, time }: AIMessageProps) {
   const isTyping = message.trim().length === 0;
 
   return (
     <motion.div
       initial={{ opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
-      className="flex justify-start mb-4 px-5"
+      className="flex flex-col items-start mb-4 px-5"
     >
       <div className="bg-white rounded-2xl rounded-tl-md px-4 py-3 max-w-[80%] shadow-[0_2px_20px_rgba(0,0,0,0.04)]">
         {isTyping ? (
@@ -42,6 +43,9 @@ export function AIMessage({ message }: AIMessageProps) {
           </div>
         )}
       </div>
+      {!isTyping && time && (
+        <span className="mt-1 pl-1 text-[11px] text-muted-foreground">{time}</span>
+      )}
     </motion.div>
   );
 }

@@ -23,6 +23,9 @@ import {
   createNewSession,
   getActiveSessionID,
   rememberSessionID,
+  MODELS,
+  getSelectedModelID,
+  rememberModelID,
   type SessionListItem,
   type SessionMessage,
 } from "./api/chat";
@@ -40,6 +43,8 @@ interface Message {
     | "confirmation"
     | "morning-greeting";
   content: any;
+  // time 为气泡下方展示的时间(HH:MM)。历史消息用后端 created_at；实时消息渲染时按需生成。
+  time?: string;
 }
 
 interface ActionItem {
@@ -78,6 +83,7 @@ const INITIAL_TAGS: StatusTagDef[] = [
     label: "姨妈期",
     color: "bg-[#FBEAEC] text-[#B5687A]",
     state: "active",
+    expandable: false,
     sparklineData: [
       { v: 3 },
       { v: 4 },
@@ -97,6 +103,14 @@ const WELCOME_MESSAGE: Message = {
   content: "你好，我是你的健康管家 🌿 有什么可以帮你的吗？",
 };
 
+// formatClock 把时间格式化成 HH:MM（与旧版一致：zh-CN 24 小时制），用于气泡下方的时间戳。
+function formatClock(date: Date): string {
+  return date.toLocaleTimeString("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 // mapBackendMessages 把后端历史消息映射成聊天区气泡；无历史时回退到欢迎语。
 function mapBackendMessages(items: SessionMessage[]): Message[] {
   if (items.length === 0) return [WELCOME_MESSAGE];
@@ -104,6 +118,7 @@ function mapBackendMessages(items: SessionMessage[]): Message[] {
     id: `srv-${item.id}`,
     type: item.role === "assistant" ? "ai" : "user",
     content: item.content,
+    time: formatClock(new Date(item.created_at)),
   }));
 }
 
@@ -127,8 +142,23 @@ function HealthWorkspace() {
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
   const [dashboardOpen, setDashboardOpen] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [selectedModelID, setSelectedModelID] = useState<string>(() =>
+    getSelectedModelID()
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // resolveTime 为每条消息提供稳定的时间戳：历史消息用自带 time，实时消息按 id 缓存首次渲染时刻。
+  const timeCacheRef = useRef<Map<string, string>>(new Map());
+  const resolveTime = (message: Message): string => {
+    if (message.time) return message.time;
+    const cache = timeCacheRef.current;
+    let cached = cache.get(message.id);
+    if (!cached) {
+      cached = formatClock(new Date());
+      cache.set(message.id, cached);
+    }
+    return cached;
+  };
 
   // refreshSessions 拉取会话列表；返回最新列表供引导逻辑使用。
   const refreshSessions = async (): Promise<SessionListItem[]> => {
@@ -506,7 +536,7 @@ function HealthWorkspace() {
                 你好，我是你的健康管家 🌿
               </h2>
               <p className="mt-2 max-w-xs text-sm leading-relaxed text-muted-foreground">
-                有什么可以帮你的吗？可以聊聊饮食、血糖，或今天的身体状态。
+                有什么想聊的吗？无论是饮食、运动，还是今天的心情，我都在。
               </p>
             </motion.div>
           </div>
@@ -524,11 +554,19 @@ function HealthWorkspace() {
                   );
                 case "user":
                   return (
-                    <UserMessage key={message.id} message={message.content} />
+                    <UserMessage
+                      key={message.id}
+                      message={message.content}
+                      time={resolveTime(message)}
+                    />
                   );
                 case "ai":
                   return (
-                    <AIMessage key={message.id} message={message.content} />
+                    <AIMessage
+                      key={message.id}
+                      message={message.content}
+                      time={resolveTime(message)}
+                    />
                   );
                 case "meal-card":
                   return <MealCard key={message.id} />;
@@ -594,6 +632,12 @@ function HealthWorkspace() {
         onPhoto={handlePhoto}
         isResponding={isSending}
         onStop={handleStop}
+        models={MODELS}
+        selectedModelID={selectedModelID}
+        onSelectModel={(id) => {
+          setSelectedModelID(id);
+          rememberModelID(id);
+        }}
       />
 
       <SessionDrawer

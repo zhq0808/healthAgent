@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Mic, Send, Plus, Square } from "lucide-react";
+import { Mic, Send, Plus, Square, Sparkles, ChevronDown, Check } from "lucide-react";
+import type { ModelOption } from "../api/chat";
 
 const PROMPTS = [
   { emoji: "🍱", label: "推荐低GI午餐" },
@@ -14,6 +15,9 @@ interface InputDockProps {
   onPhoto: (file: File) => void;
   isResponding: boolean;
   onStop: () => void;
+  models: ModelOption[];
+  selectedModelID: string;
+  onSelectModel: (modelID: string) => void;
 }
 
 export function InputDock({
@@ -22,10 +26,17 @@ export function InputDock({
   onPhoto,
   isResponding,
   onStop,
+  models,
+  selectedModelID,
+  onSelectModel,
 }: InputDockProps) {
   const [input, setInput] = useState("");
   const [isRecording, setIsRecording] = useState(false);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const selectedModel =
+    models.find((m) => m.id === selectedModelID) ?? models[0];
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,18 +57,77 @@ export function InputDock({
 
   return (
     <div className="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-[#F6F8F4] via-[#F6F8F4]/96 to-transparent pt-8 pb-7 px-5">
-      <div className="flex items-center gap-2 mb-3 overflow-x-auto no-scrollbar">
-        {PROMPTS.map((p) => (
+      {/* 快捷提示行；模型选择器放在同一行最左侧（在滚动容器之外，避免向上弹出的菜单被裁剪）。 */}
+      <div className="flex items-center gap-2 mb-3">
+        {/* 模型选择。当前仅前端选择与本地记忆，后端支持后再随请求下发。 */}
+        <div className="relative flex-shrink-0">
           <button
-            key={p.label}
             type="button"
-            onClick={() => onSendMessage(`${p.emoji} ${p.label}`)}
-            className="flex-shrink-0 flex items-center gap-1.5 bg-white rounded-full px-3.5 py-2 text-xs text-gray-600 shadow-[0_2px_12px_rgba(0,0,0,0.05)] hover:bg-gray-50 transition-colors"
+            onClick={() => setModelMenuOpen((v) => !v)}
+            className="flex items-center gap-1.5 rounded-full bg-white px-3 py-2 text-xs text-gray-600 shadow-[0_2px_12px_rgba(0,0,0,0.05)] hover:bg-gray-50 transition-colors"
           >
-            <span>{p.emoji}</span>
-            <span>{p.label}</span>
+            <Sparkles size={13} className="text-primary" />
+            <span className="font-medium">{selectedModel?.name}</span>
+            <ChevronDown
+              size={13}
+              className={`opacity-50 transition-transform ${
+                modelMenuOpen ? "rotate-180" : ""
+              }`}
+            />
           </button>
-        ))}
+
+          {modelMenuOpen && (
+            <>
+              <div
+                className="fixed inset-0 z-10"
+                onClick={() => setModelMenuOpen(false)}
+              />
+              <div className="absolute bottom-full left-0 z-20 mb-1.5 w-56 overflow-hidden rounded-2xl border border-black/5 bg-white py-1 shadow-[0_8px_32px_rgba(0,0,0,0.12)]">
+                {models.map((model) => {
+                  const active = model.id === selectedModelID;
+                  return (
+                    <button
+                      key={model.id}
+                      type="button"
+                      onClick={() => {
+                        onSelectModel(model.id);
+                        setModelMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-gray-50"
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[13px] font-medium text-gray-800">
+                          {model.name}
+                        </span>
+                        <span className="block truncate text-[11px] text-gray-400">
+                          {model.desc}
+                        </span>
+                      </span>
+                      {active && (
+                        <Check size={15} className="flex-shrink-0 text-primary" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* 快捷提示（可横向滚动） */}
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+          {PROMPTS.map((p) => (
+            <button
+              key={p.label}
+              type="button"
+              onClick={() => onSendMessage(`${p.emoji} ${p.label}`)}
+              className="flex-shrink-0 flex items-center gap-1.5 bg-white rounded-full px-3.5 py-2 text-xs text-gray-600 shadow-[0_2px_12px_rgba(0,0,0,0.05)] hover:bg-gray-50 transition-colors"
+            >
+              <span>{p.emoji}</span>
+              <span>{p.label}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       <form onSubmit={handleSubmit} className="flex items-center gap-2.5">
