@@ -26,7 +26,7 @@ export function InputDock({ onSendMessage, onVoiceInput }: InputDockProps) {
   };
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-[#FAF9F6] via-[#FAF9F6]/96 to-transparent pt-8 pb-7 px-5">
+    <div className="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-[#F6F8F4] via-[#F6F8F4]/96 to-transparent pt-8 pb-7 px-5">
       <div className="flex items-center gap-2 mb-3 overflow-x-auto no-scrollbar">
         {PROMPTS.map((p) => (
           <button

@@ -16,6 +16,25 @@ interface SessionResponse {
   session_id: string;
 }
 
+// SessionListItem 对应后端 GET /api/v1/sessions 的单项返回。
+export interface SessionListItem {
+  session_id: string;
+  title: string;
+  status: string;
+  message_count: number;
+  last_message_at?: string;
+  created_at: string;
+}
+
+// SessionMessage 对应后端 GET /api/v1/sessions/:session_id/messages 的单项返回。
+export interface SessionMessage {
+  id: number;
+  role: string;
+  content: string;
+  seq: number;
+  created_at: string;
+}
+
 const sessionIDKey = "health_agent_session_id_v2";
 
 // createOrResumeGuest 始终请求后端：有效 HttpOnly Cookie 会恢复原 Guest，
@@ -57,6 +76,47 @@ export async function ensureSessionID(): Promise<string> {
 
 export async function createNewSession(): Promise<string> {
   return requestNewSession();
+}
+
+// getActiveSessionID 读取当前记住的会话 ID；没有则返回 null。
+export function getActiveSessionID(): string | null {
+  return localStorage.getItem(sessionIDKey);
+}
+
+// rememberSessionID 记住当前活跃会话 ID，供刷新后恢复。
+export function rememberSessionID(sessionID: string): void {
+  localStorage.setItem(sessionIDKey, sessionID);
+}
+
+// listSessions 拉取当前访客名下的会话列表（后端按最近活跃倒序返回）。
+export async function listSessions(): Promise<SessionListItem[]> {
+  const res = await fetch("/api/v1/sessions", {
+    method: "GET",
+    credentials: "include",
+  });
+  const body = (await res.json()) as APIResponse & { data?: SessionListItem[] };
+  if (!res.ok || body.code !== 0) {
+    throw new Error(body.message || "查询会话列表失败");
+  }
+  return body.data ?? [];
+}
+
+// listSessionMessages 拉取指定会话内已完成、未删除的历史消息。
+export async function listSessionMessages(
+  sessionID: string
+): Promise<SessionMessage[]> {
+  const res = await fetch(
+    `/api/v1/sessions/${encodeURIComponent(sessionID)}/messages`,
+    {
+      method: "GET",
+      credentials: "include",
+    }
+  );
+  const body = (await res.json()) as APIResponse & { data?: SessionMessage[] };
+  if (!res.ok || body.code !== 0) {
+    throw new Error(body.message || "查询会话消息失败");
+  }
+  return body.data ?? [];
 }
 
 // 一帧 SSE 解析后的结果。event 为 "message"(默认增量) | "done" | "error"。

@@ -45,8 +45,8 @@ type ChatConfig struct {
 	// MaxReplyChars 是单条 assistant 回复累积的最大字符数上限，防止模型异常时（例如陷入重复输出）
 	// 无限占用内存并写入一条超大的数据库行。<=0 时回退为 service.DefaultMaxReplyChars。
 	MaxReplyChars  int    `yaml:"max_reply_chars" env:"MAX_REPLY_CHARS" env-default:"4000"`
-	PromptPath     string `yaml:"prompt_path" env:"PROMPT_PATH" env-default:"prompts/health_chat_v2.tmpl"`
-	PromptVersion  string `yaml:"prompt_version" env:"PROMPT_VERSION" env-default:"health-chat-v2"`
+	PromptPath     string `yaml:"prompt_path" env:"PROMPT_PATH" env-default:"prompts/health_chat_v1.tmpl"`
+	PromptVersion  string `yaml:"prompt_version" env:"PROMPT_VERSION" env-default:"health-chat-v1"`
 	SafetyBoundary string `yaml:"safety_boundary" env:"SAFETY_BOUNDARY" env-default:"健康建议仅供一般信息参考，不能替代医生面诊、诊断或治疗。"`
 }
 

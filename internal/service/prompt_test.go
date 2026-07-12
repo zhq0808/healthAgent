@@ -8,8 +8,8 @@ import (
 
 func TestProductChatPromptCoversAINativeRoles(t *testing.T) {
 	prompt, err := LoadChatPrompt(
-		filepath.Join("..", "..", "prompts", "health_chat_v3.tmpl"),
-		"health-chat-v3",
+		filepath.Join("..", "..", "prompts", "health_chat_v1.tmpl"),
+		"health-chat-v1",
 		"不得诊断或开处方",
 	)
 	if err != nil {
@@ -32,7 +32,7 @@ func TestProductChatPromptCoversAINativeRoles(t *testing.T) {
 		"不能替代医生建议",
 		"不得自行缩小或重新解释过敏范围",
 		"400 个汉字以内",
-		"health-chat-v3",
+		"health-chat-v1",
 		"花生过敏",
 	} {
 		if !strings.Contains(rendered, required) {

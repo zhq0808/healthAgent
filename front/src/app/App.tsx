@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
-import { AnimatePresence } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { Leaf } from "lucide-react";
 import { StatusTags, StatusTagDef } from "./components/StatusTags";
 import { MealSuggestionCard } from "./components/MealSuggestionCard";
 import { ActionCard } from "./components/ActionCard";
@@ -10,10 +11,20 @@ import { InputDock } from "./components/InputDock";
 import { UserMessage } from "./components/UserMessage";
 import { AIMessage } from "./components/AIMessage";
 import { MealCard } from "./components/MealCard";
+import { AppHeader } from "./components/AppHeader";
+import { SessionDrawer } from "./components/SessionDrawer";
+import { Dashboard } from "./components/Dashboard";
 import {
   createOrResumeGuest,
   ensureSessionID,
   sendChatStream,
+  listSessions,
+  listSessionMessages,
+  createNewSession,
+  getActiveSessionID,
+  rememberSessionID,
+  type SessionListItem,
+  type SessionMessage,
 } from "./api/chat";
 import { AuthPage } from "./pages/AuthPage";
 
@@ -97,6 +108,22 @@ const INITIAL_TAGS: StatusTagDef[] = [
   },
 ];
 
+const WELCOME_MESSAGE: Message = {
+  id: "welcome",
+  type: "ai",
+  content: "你好，我是你的健康管家 🌿 有什么可以帮你的吗？",
+};
+
+// mapBackendMessages 把后端历史消息映射成聊天区气泡；无历史时回退到欢迎语。
+function mapBackendMessages(items: SessionMessage[]): Message[] {
+  if (items.length === 0) return [WELCOME_MESSAGE];
+  return items.map((item) => ({
+    id: `srv-${item.id}`,
+    type: item.role === "assistant" ? "ai" : "user",
+    content: item.content,
+  }));
+}
+
 function HealthWorkspace() {
   const [tags, setTags] = useState<StatusTagDef[]>(INITIAL_TAGS);
   const [actions, setActions] = useState<ActionItem[]>(initialActions);
@@ -104,14 +131,107 @@ function HealthWorkspace() {
     {
       id: "welcome",
       type: "ai",
-      content: "太好了！精气神回来了 ✨ 中午想吃点什么，还是看看本周的总结？",
+      content: "你好，我是你的健康管家 🌿 有什么可以帮你的吗？",
     },
-    { id: "meal-card", type: "meal-card", content: null },
   ]);
 
   const [pendingConfirmation, setPendingConfirmation] =
     useState<Message | null>(null);
+  const [activeSessionID, setActiveSessionID] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<SessionListItem[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
+  const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
+  const [dashboardOpen, setDashboardOpen] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // refreshSessions 拉取会话列表；返回最新列表供引导逻辑使用。
+  const refreshSessions = async (): Promise<SessionListItem[]> => {
+    setSessionsLoading(true);
+    setSessionsError(null);
+    try {
+      const list = await listSessions();
+      setSessions(list);
+      return list;
+    } catch {
+      setSessionsError("会话列表加载失败");
+      return [];
+    } finally {
+      setSessionsLoading(false);
+    }
+  };
+
+  // loadSessionMessages 用后端历史消息替换聊天区；无历史时回退到欢迎语。
+  const loadSessionMessages = async (sessionID: string) => {
+    try {
+      const items = await listSessionMessages(sessionID);
+      setMessages(mapBackendMessages(items));
+    } catch {
+      setMessages([WELCOME_MESSAGE]);
+    }
+  };
+
+  // 启动引导：拉列表 → 校验 localStorage → 选最近会话 → 无会话再创建 → 载入消息。
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const list = await refreshSessions();
+      if (cancelled) return;
+
+      const stored = getActiveSessionID();
+      let active =
+        stored && list.some((s) => s.session_id === stored)
+          ? stored
+          : list[0]?.session_id ?? null;
+
+      if (!active) {
+        try {
+          active = await createNewSession();
+          if (!cancelled) await refreshSessions();
+        } catch {
+          active = null;
+        }
+      }
+
+      if (cancelled || !active) return;
+      setActiveSessionID(active);
+      rememberSessionID(active);
+      await loadSessionMessages(active);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // 仅在挂载时引导一次。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleSelectSession = async (sessionID: string) => {
+    if (isSending) return;
+    setSessionDrawerOpen(false);
+    if (sessionID === activeSessionID) return;
+    setActiveSessionID(sessionID);
+    rememberSessionID(sessionID);
+    setPendingConfirmation(null);
+    await loadSessionMessages(sessionID);
+  };
+
+  const handleCreateSession = async () => {
+    if (isSending) return;
+    try {
+      const sessionID = await createNewSession();
+      setActiveSessionID(sessionID);
+      rememberSessionID(sessionID);
+      setPendingConfirmation(null);
+      setMessages([WELCOME_MESSAGE]);
+      setSessionDrawerOpen(false);
+      await refreshSessions();
+    } catch {
+      setSessionsError("创建会话失败");
+    }
+  };
+
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -207,9 +327,14 @@ function HealthWorkspace() {
       { id: typingId, type: "ai", content: "正在思考…" },
     ]);
 
+    setIsSending(true);
     try {
-      const sessionID = await ensureSessionID();
-	  const clientMessageID = crypto.randomUUID();
+      const sessionID = activeSessionID ?? (await ensureSessionID());
+      if (!activeSessionID) {
+        setActiveSessionID(sessionID);
+        rememberSessionID(sessionID);
+      }
+      const clientMessageID = crypto.randomUUID();
       let acc = "";
       await sendChatStream(sessionID, clientMessageID, text, (delta) => {
         acc += delta;
@@ -217,6 +342,8 @@ function HealthWorkspace() {
           prev.map((m) => (m.id === typingId ? { ...m, content: acc } : m))
         );
       });
+      // 回复完成后刷新会话列表，更新消息数与最近活跃时间。
+      void refreshSessions();
     } catch {
       setMessages((prev) =>
         prev.map((m) =>
@@ -225,6 +352,8 @@ function HealthWorkspace() {
             : m
         )
       );
+    } finally {
+      setIsSending(false);
     }
   };
 
@@ -294,12 +423,41 @@ function HealthWorkspace() {
     setPendingConfirmation(null);
   };
 
+  // 对话是否已开始：只剩欢迎语且无待确认卡时视为未开始，此时欢迎语居中显示。
+  const conversationStarted =
+    pendingConfirmation != null || messages.some((m) => m.id !== "welcome");
+
   return (
-    <div className="size-full flex flex-col overflow-hidden bg-background">
+    <div className="size-full flex flex-col overflow-hidden bg-background relative">
+      <AppHeader
+        onOpenSessions={() => setSessionDrawerOpen(true)}
+        onOpenDashboard={() => setDashboardOpen(true)}
+      />
+
       <StatusTags tags={tags} />
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto pb-36">
-        <div className="min-h-full flex flex-col justify-center pt-2">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+        {!conversationStarted ? (
+          <div className="min-h-full flex flex-col items-center justify-center px-6 pb-36 text-center">
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, ease: "easeOut" }}
+              className="flex flex-col items-center"
+            >
+              <div className="w-16 h-16 rounded-3xl bg-primary flex items-center justify-center mb-5 shadow-sm">
+                <Leaf size={30} className="text-white" />
+              </div>
+              <h2 className="text-2xl font-semibold text-foreground">
+                你好，我是你的健康管家 🌿
+              </h2>
+              <p className="mt-2 max-w-xs text-sm leading-relaxed text-muted-foreground">
+                有什么可以帮你的吗？可以聊聊饮食、血糖，或今天的身体状态。
+              </p>
+            </motion.div>
+          </div>
+        ) : (
+        <div className="flex flex-col pt-2 pb-36">
           <AnimatePresence>
             {messages.map((message) => {
               switch (message.type) {
@@ -373,12 +531,42 @@ function HealthWorkspace() {
             )}
           </AnimatePresence>
         </div>
+        )}
       </div>
 
       <InputDock
         onSendMessage={handleSendMessage}
         onVoiceInput={() => {}}
       />
+
+      <SessionDrawer
+        open={sessionDrawerOpen}
+        sessions={sessions}
+        activeSessionID={activeSessionID}
+        loading={sessionsLoading}
+        error={sessionsError}
+        busy={isSending}
+        onClose={() => setSessionDrawerOpen(false)}
+        onSelect={handleSelectSession}
+        onCreate={handleCreateSession}
+        onRetry={refreshSessions}
+      />
+
+      <AnimatePresence>
+        {dashboardOpen && (
+          <>
+            <motion.div
+              key="dashboard-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/20 z-40"
+              onClick={() => setDashboardOpen(false)}
+            />
+            <Dashboard onClose={() => setDashboardOpen(false)} />
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

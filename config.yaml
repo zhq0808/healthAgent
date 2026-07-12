@@ -11,8 +11,8 @@ identity:
 # 聊天业务层配置（不是大模型传输层配置，那部分在 deepseek/openai 下面）。
 chat:
   max_reply_chars: 4000  # 单条 assistant 回复累积上限，超过截断收尾，防止异常输出撑爆内存/数据库行
-  prompt_path: "prompts/health_chat_v3.tmpl"
-  prompt_version: "health-chat-v3"
+  prompt_path: "prompts/health_chat_v1.tmpl"
+  prompt_version: "health-chat-v1"
   safety_boundary: "健康建议仅供一般信息参考，不能替代医生面诊、诊断或治疗。"
 
 deepseek:
