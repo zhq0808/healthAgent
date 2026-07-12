@@ -56,23 +56,6 @@ const initialActions: ActionItem[] = [
 
 const INITIAL_TAGS: StatusTagDef[] = [
   {
-    id: "blood-sugar",
-    emoji: "🩸",
-    label: "关注控糖",
-    color: "bg-[#EEF2E8] text-[#5A7C5C]",
-    state: "active",
-    sparklineData: [
-      { v: 5.3 },
-      { v: 5.5 },
-      { v: 5.4 },
-      { v: 5.2 },
-      { v: 5.5 },
-      { v: 5.4 },
-      { v: 5.4 },
-    ],
-    summary: "近期血糖平稳，7 天均值 5.4",
-  },
-  {
     id: "energy",
     emoji: "✨",
     label: "满血复活",
@@ -180,7 +163,7 @@ function HealthWorkspace() {
       if (cancelled) return;
 
       const stored = getActiveSessionID();
-      let active =
+      let active: string | null =
         stored && list.some((s) => s.session_id === stored)
           ? stored
           : list[0]?.session_id ?? null;
