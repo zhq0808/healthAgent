@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Mic, Send } from "lucide-react";
+import { Mic, Send, Plus, Square } from "lucide-react";
 
 const PROMPTS = [
   { emoji: "🍱", label: "推荐低GI午餐" },
@@ -11,11 +11,21 @@ const PROMPTS = [
 interface InputDockProps {
   onSendMessage: (message: string) => void;
   onVoiceInput: () => void;
+  onPhoto: (file: File) => void;
+  isResponding: boolean;
+  onStop: () => void;
 }
 
-export function InputDock({ onSendMessage, onVoiceInput }: InputDockProps) {
+export function InputDock({
+  onSendMessage,
+  onVoiceInput,
+  onPhoto,
+  isResponding,
+  onStop,
+}: InputDockProps) {
   const [input, setInput] = useState("");
   const [isRecording, setIsRecording] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,6 +33,15 @@ export function InputDock({ onSendMessage, onVoiceInput }: InputDockProps) {
       onSendMessage(input.trim());
       setInput("");
     }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      onPhoto(file);
+    }
+    // 重置，允许连续选择同一文件时也能再次触发 change。
+    e.target.value = "";
   };
 
   return (
@@ -42,6 +61,24 @@ export function InputDock({ onSendMessage, onVoiceInput }: InputDockProps) {
       </div>
 
       <form onSubmit={handleSubmit} className="flex items-center gap-2.5">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={handleFileChange}
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          aria-label="拍照 / 上传图片"
+          title="拍照 / 上传图片"
+          className="w-11 h-11 rounded-full flex items-center justify-center shadow-[0_2px_16px_rgba(0,0,0,0.07)] bg-white text-gray-500 hover:bg-gray-50 transition-colors flex-shrink-0"
+        >
+          <Plus className="w-[20px] h-[20px]" />
+        </button>
+
         <div className="flex-1 relative">
           <input
             type="text"
@@ -66,22 +103,38 @@ export function InputDock({ onSendMessage, onVoiceInput }: InputDockProps) {
           </AnimatePresence>
         </div>
 
-        <motion.button
-          type="button"
-          onClick={() => {
-            setIsRecording(!isRecording);
-            onVoiceInput();
-          }}
-          animate={{ scale: isRecording ? [1, 1.08, 1] : 1 }}
-          transition={{ repeat: isRecording ? Infinity : 0, duration: 1.5 }}
-          className={`w-11 h-11 rounded-full flex items-center justify-center shadow-[0_2px_16px_rgba(0,0,0,0.07)] transition-colors flex-shrink-0 ${
-            isRecording
-              ? "bg-[#F4A460] text-white"
-              : "bg-white text-gray-500 hover:bg-gray-50"
-          }`}
-        >
-          <Mic className="w-[18px] h-[18px]" />
-        </motion.button>
+        {isResponding ? (
+          <motion.button
+            type="button"
+            onClick={onStop}
+            aria-label="停止回答"
+            title="停止回答"
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="w-11 h-11 rounded-full flex items-center justify-center shadow-[0_2px_16px_rgba(0,0,0,0.07)] bg-primary text-white transition-colors flex-shrink-0"
+          >
+            <Square className="w-4 h-4" fill="currentColor" />
+          </motion.button>
+        ) : (
+          <motion.button
+            type="button"
+            onClick={() => {
+              setIsRecording(!isRecording);
+              onVoiceInput();
+            }}
+            aria-label="语音输入"
+            title="语音输入"
+            animate={{ scale: isRecording ? [1, 1.08, 1] : 1 }}
+            transition={{ repeat: isRecording ? Infinity : 0, duration: 1.5 }}
+            className={`w-11 h-11 rounded-full flex items-center justify-center shadow-[0_2px_16px_rgba(0,0,0,0.07)] transition-colors flex-shrink-0 ${
+              isRecording
+                ? "bg-[#F4A460] text-white"
+                : "bg-white text-gray-500 hover:bg-gray-50"
+            }`}
+          >
+            <Mic className="w-[18px] h-[18px]" />
+          </motion.button>
+        )}
       </form>
     </div>
   );

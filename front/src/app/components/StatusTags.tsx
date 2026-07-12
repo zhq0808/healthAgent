@@ -18,9 +18,8 @@ interface StatusTagsProps {
 }
 
 export function StatusTags({ tags }: StatusTagsProps) {
-  const [openId, setOpenId] = useState<string | null>(
-    () => tags.find((t) => t.state === "active")?.id ?? null
-  );
+  // 默认全部收起，用户点击标签才展开对应的小卡片。
+  const [openId, setOpenId] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

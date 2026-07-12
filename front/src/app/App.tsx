@@ -128,6 +128,7 @@ function HealthWorkspace() {
   const [dashboardOpen, setDashboardOpen] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   // refreshSessions 拉取会话列表；返回最新列表供引导逻辑使用。
   const refreshSessions = async (): Promise<SessionListItem[]> => {
@@ -212,6 +213,34 @@ function HealthWorkspace() {
       await refreshSessions();
     } catch {
       setSessionsError("创建会话失败");
+    }
+  };
+
+  // handleRenameSession 会话重命名。TODO(后端): 接入 PATCH /api/v1/sessions/:id
+  // 后改为调用后端并以返回结果为准；当前仅前端本地生效，刷新后会被后端列表覆盖。
+  const handleRenameSession = (sessionID: string, title: string) => {
+    setSessions((prev) =>
+      prev.map((s) => (s.session_id === sessionID ? { ...s, title } : s))
+    );
+  };
+
+  // handleDeleteSession 删除会话。TODO(后端): 接入 DELETE /api/v1/sessions/:id
+  // 后改为调用后端软删除；当前仅前端本地移除，刷新后会被后端列表覆盖。
+  const handleDeleteSession = (sessionID: string) => {
+    if (isSending) return;
+    const remaining = sessions.filter((s) => s.session_id !== sessionID);
+    setSessions(remaining);
+
+    if (sessionID === activeSessionID) {
+      const next = remaining[0]?.session_id ?? null;
+      setActiveSessionID(next);
+      setPendingConfirmation(null);
+      if (next) {
+        rememberSessionID(next);
+        void loadSessionMessages(next);
+      } else {
+        setMessages([WELCOME_MESSAGE]);
+      }
     }
   };
 
@@ -303,13 +332,16 @@ function HealthWorkspace() {
       return;
     }
 
-    // 其余自由对话走真实 chat 接口。先插入占位气泡，返回后原地替换。
+    // 其余自由对话走真实 chat 接口。先插入空占位气泡（显示三点动画），返回后原地替换。
     const typingId = Date.now().toString() + "-typing";
     setMessages((prev) => [
       ...prev,
-      { id: typingId, type: "ai", content: "正在思考…" },
+      { id: typingId, type: "ai", content: "" },
     ]);
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+    let acc = "";
     setIsSending(true);
     try {
       const sessionID = activeSessionID ?? (await ensureSessionID());
@@ -318,24 +350,42 @@ function HealthWorkspace() {
         rememberSessionID(sessionID);
       }
       const clientMessageID = crypto.randomUUID();
-      let acc = "";
-      await sendChatStream(sessionID, clientMessageID, text, (delta) => {
-        acc += delta;
-        setMessages((prev) =>
-          prev.map((m) => (m.id === typingId ? { ...m, content: acc } : m))
-        );
-      });
+      await sendChatStream(
+        sessionID,
+        clientMessageID,
+        text,
+        (delta) => {
+          acc += delta;
+          setMessages((prev) =>
+            prev.map((m) => (m.id === typingId ? { ...m, content: acc } : m))
+          );
+        },
+        controller.signal
+      );
       // 回复完成后刷新会话列表，更新消息数与最近活跃时间。
       void refreshSessions();
     } catch {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === typingId
-            ? { ...m, content: "抱歉，暂时没能连上健康管家，请稍后再试。" }
-            : m
-        )
-      );
+      if (controller.signal.aborted) {
+        // 用户主动停止：保留已生成内容；若还没吐出内容则给出停止提示。
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === typingId
+              ? { ...m, content: acc || "（已停止回答）" }
+              : m
+          )
+        );
+        void refreshSessions();
+      } else {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === typingId
+              ? { ...m, content: "抱歉，暂时没能连上健康管家，请稍后再试。" }
+              : m
+          )
+        );
+      }
     } finally {
+      abortRef.current = null;
       setIsSending(false);
     }
   };
@@ -404,6 +454,27 @@ function HealthWorkspace() {
 
   const handleCancelConfirmation = () => {
     setPendingConfirmation(null);
+  };
+
+  // handleStop 用户主动中止正在进行的流式回复。
+  const handleStop = () => {
+    abortRef.current?.abort();
+  };
+
+  // handlePhoto 拍照/选图入口。图片识别后端管线尚未接入，先给出本地占位回复。
+  const handlePhoto = (file: File) => {
+    const base = Date.now().toString();
+    setMessages((prev) => [
+      ...prev,
+      { id: base + "-photo-user", type: "user", content: "📷 [已上传照片]" },
+      {
+        id: base + "-photo-ai",
+        type: "ai",
+        content:
+          "已收到照片～ 图片识别功能正在开发中，很快就能帮你分析饮食和营养了。",
+      },
+    ]);
+    void file;
   };
 
   // 对话是否已开始：只剩欢迎语且无待确认卡时视为未开始，此时欢迎语居中显示。
@@ -520,6 +591,9 @@ function HealthWorkspace() {
       <InputDock
         onSendMessage={handleSendMessage}
         onVoiceInput={() => {}}
+        onPhoto={handlePhoto}
+        isResponding={isSending}
+        onStop={handleStop}
       />
 
       <SessionDrawer
@@ -533,6 +607,8 @@ function HealthWorkspace() {
         onSelect={handleSelectSession}
         onCreate={handleCreateSession}
         onRetry={refreshSessions}
+        onRename={handleRenameSession}
+        onDelete={handleDeleteSession}
       />
 
       <AnimatePresence>
