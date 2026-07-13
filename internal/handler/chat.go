@@ -99,6 +99,7 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 		}
 		s.log.Error("校验会话归属失败",
 			"trace_id", TraceIDFromContext(c.Request.Context()),
+			"session_id", req.SessionID,
 			"error", err,
 		)
 		fail(c, http.StatusInternalServerError, CodeInternal, "会话服务暂时不可用")
@@ -135,6 +136,8 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 	if err != nil {
 		s.log.Error("获取 turn 租约失败",
 			"trace_id", TraceIDFromContext(c.Request.Context()),
+			"session_id", req.SessionID,
+			"client_message_id", req.ClientMessageID,
 			"error", err,
 		)
 		fail(c, http.StatusInternalServerError, CodeInternal, "对话服务暂时不可用")
@@ -170,6 +173,8 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 		}); releaseErr != nil {
 			s.log.Error("释放 turn 租约失败",
 				"trace_id", TraceIDFromContext(c.Request.Context()),
+				"session_id", req.SessionID,
+				"message_id", leaseResult.UserMessage.MessageID,
 				"error", releaseErr,
 			)
 		}
@@ -179,6 +184,7 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 	if err != nil {
 		s.log.Error("读取对话历史失败",
 			"trace_id", TraceIDFromContext(c.Request.Context()),
+			"session_id", req.SessionID,
 			"error", err,
 		)
 		fail(c, http.StatusInternalServerError, CodeInternal, "读取对话历史失败")
@@ -218,6 +224,8 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 		}); err != nil {
 			s.log.Error("assistant 消息落库失败",
 				"trace_id", TraceIDFromContext(c.Request.Context()),
+				"session_id", req.SessionID,
+				"message_id", leaseResult.UserMessage.MessageID,
 				"error", err,
 			)
 			_ = writeSSE("error", `{"message":"回复保存失败，请稍后重试"}`)
@@ -227,6 +235,8 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 		if err := writeSSE("done", "{}"); err != nil {
 			s.log.Warn("turn 已完成但 done 事件发送失败",
 				"trace_id", TraceIDFromContext(c.Request.Context()),
+				"session_id", req.SessionID,
+				"message_id", leaseResult.UserMessage.MessageID,
 				"error", err,
 			)
 		}
@@ -245,6 +255,8 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 		}
 		s.log.Error("流式对话调用失败",
 			"trace_id", TraceIDFromContext(c.Request.Context()),
+			"session_id", req.SessionID,
+			"message_id", leaseResult.UserMessage.MessageID,
 			"error", err,
 		)
 		// 已经开始流（header 无法再改成 500），用 error 事件通知前端。
