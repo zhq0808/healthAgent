@@ -4,12 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"healthAgent/internal/service"
 )
+
+// maxMessageIDAttempts 限制 message_id 生成的有限冲突重试次数。UUIDv7 有 122 位随机，
+// 碰撞概率极低，这里用保存点包住 INSERT，仅在命中 message_id 唯一冲突时重新生成重试。
+const maxMessageIDAttempts = 5
 
 // PostgresMessageRepository 使用共享连接池持久化对话消息。
 type PostgresMessageRepository struct {
@@ -38,18 +44,18 @@ func (r *PostgresMessageRepository) AppendUserMessage(ctx context.Context, reque
 	return result, nil
 }
 
-// appendUserMessageTx 在调用方提供的短事务中锁定 Session、分配 seq，并幂等写入用户消息。
-// 调用方负责提交或回滚事务。
+// appendUserMessageTx 在调用方提供的短事务中锁定 Session、从 next_message_seq 分配 seq，
+// 并幂等写入用户消息。message_id 由后端生成 UUIDv7。调用方负责提交或回滚事务。
 func appendUserMessageTx(ctx context.Context, tx pgx.Tx, request service.AppendUserMessageRequest) (service.AppendUserMessageResult, error) {
-	var messageCount int
+	var nextSeq int64
 	err := tx.QueryRow(ctx, `
-		SELECT message_count
+		SELECT next_message_seq
 		FROM agent_memory_session
 		WHERE session_id = $1
 		  AND user_id = $2
 		  AND status = 'active'
 		  AND deleted_at IS NULL
-		FOR UPDATE`, request.SessionID, request.UserID).Scan(&messageCount)
+		FOR UPDATE`, request.SessionID, request.UserID).Scan(&nextSeq)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return service.AppendUserMessageResult{}, service.ErrSessionNotFound
 	}
@@ -58,8 +64,8 @@ func appendUserMessageTx(ctx context.Context, tx pgx.Tx, request service.AppendU
 	}
 
 	existing, err := scanUserMessage(tx.QueryRow(ctx, `
-		SELECT id, user_id, session_id, client_message_id::text, seq,
-		       COALESCE(content, ''), COALESCE(trace_id, ''), created_at
+		SELECT message_id::text, user_id, session_id, client_message_id::text, seq,
+		       COALESCE(content, ''), created_at
 		FROM agent_memory_episodic
 		WHERE user_id = $1
 		  AND session_id = $2
@@ -72,38 +78,30 @@ func appendUserMessageTx(ctx context.Context, tx pgx.Tx, request service.AppendU
 		return service.AppendUserMessageResult{}, fmt.Errorf("查询幂等用户消息失败: %w", err)
 	}
 
-	nextSeq := messageCount + 1
-	message, err := scanUserMessage(tx.QueryRow(ctx, `
-		INSERT INTO agent_memory_episodic (
-			session_id, user_id, agent_id, seq, role, status,
-			content, client_message_id, trace_id
-		)
-		VALUES ($1, $2, $3, $4, 'user', 'completed', $5, $6, $7)
-		RETURNING id, user_id, session_id, client_message_id::text, seq,
-		          COALESCE(content, ''), COALESCE(trace_id, ''), created_at`,
-		request.SessionID,
-		request.UserID,
-		service.HealthAgentID,
-		nextSeq,
-		request.Content,
-		request.ClientMessageID,
-		request.TraceID,
-	))
+	message, err := insertEpisodicWithRetry(ctx, tx, func(sp pgx.Tx, messageID string) (service.UserMessage, error) {
+		return scanUserMessage(sp.QueryRow(ctx, `
+			INSERT INTO agent_memory_episodic (
+				message_id, session_id, user_id, agent_id, seq, role, status,
+				content, client_message_id
+			)
+			VALUES ($1, $2, $3, $4, $5, 'user', 'completed', $6, $7)
+			RETURNING message_id::text, user_id, session_id, client_message_id::text, seq,
+			          COALESCE(content, ''), created_at`,
+			messageID,
+			request.SessionID,
+			request.UserID,
+			service.HealthAgentID,
+			nextSeq,
+			request.Content,
+			request.ClientMessageID,
+		))
+	})
 	if err != nil {
 		return service.AppendUserMessageResult{}, fmt.Errorf("写入用户消息失败: %w", err)
 	}
 
-	command, err := tx.Exec(ctx, `
-		UPDATE agent_memory_session
-		SET message_count = $3,
-		    last_message_at = $4
-		WHERE session_id = $1
-		  AND user_id = $2`, request.SessionID, request.UserID, nextSeq, message.CreatedAt)
-	if err != nil {
-		return service.AppendUserMessageResult{}, fmt.Errorf("更新会话消息计数失败: %w", err)
-	}
-	if command.RowsAffected() != 1 {
-		return service.AppendUserMessageResult{}, fmt.Errorf("更新会话消息计数影响行数异常: %d", command.RowsAffected())
+	if err := advanceSessionCounters(ctx, tx, request.SessionID, request.UserID, message.CreatedAt); err != nil {
+		return service.AppendUserMessageResult{}, err
 	}
 
 	return service.AppendUserMessageResult{Message: message, Created: true}, nil
@@ -127,18 +125,18 @@ func (r *PostgresMessageRepository) AppendAssistantMessage(ctx context.Context, 
 	return message, nil
 }
 
-// appendAssistantMessageTx 在调用方提供的短事务中追加 assistant 消息并更新 Session 计数。
-// ParentID 为 0 时保持 NULL；调用方负责提交或回滚事务。
+// appendAssistantMessageTx 在调用方提供的短事务中追加 assistant 消息并推进 Session 序号/计数。
+// ParentMessageID 为空时 parent_message_id 保持 NULL；调用方负责提交或回滚事务。
 func appendAssistantMessageTx(ctx context.Context, tx pgx.Tx, request service.AppendAssistantMessageRequest) (service.AssistantMessage, error) {
-	var messageCount int
+	var nextSeq int64
 	err := tx.QueryRow(ctx, `
-		SELECT message_count
+		SELECT next_message_seq
 		FROM agent_memory_session
 		WHERE session_id = $1
 		  AND user_id = $2
 		  AND status = 'active'
 		  AND deleted_at IS NULL
-		FOR UPDATE`, request.SessionID, request.UserID).Scan(&messageCount)
+		FOR UPDATE`, request.SessionID, request.UserID).Scan(&nextSeq)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return service.AssistantMessage{}, service.ErrSessionNotFound
 	}
@@ -146,46 +144,102 @@ func appendAssistantMessageTx(ctx context.Context, tx pgx.Tx, request service.Ap
 		return service.AssistantMessage{}, fmt.Errorf("锁定会话失败: %w", err)
 	}
 
-	nextSeq := messageCount + 1
-	message, err := scanAssistantMessage(tx.QueryRow(ctx, `
-		INSERT INTO agent_memory_episodic (
-			session_id, user_id, agent_id, seq, parent_id, role, status,
-			content, trace_id, meta_data
-		)
-		VALUES (
-			$1, $2, $3, $4, NULLIF($5, 0), 'assistant', 'completed', $6, $7,
-			jsonb_build_object('prompt_version', $8::text, 'model', $9::text)
-		)
-		RETURNING id, user_id, session_id, seq,
-		          COALESCE(content, ''), COALESCE(trace_id, ''), created_at`,
-		request.SessionID,
-		request.UserID,
-		service.HealthAgentID,
-		nextSeq,
-		request.ParentID,
-		request.Content,
-		request.TraceID,
-		request.PromptVersion,
-		request.ModelName,
-	))
+	// parent_message_id 是 UUID 列；空字符串不能直接写入，用 nil 让 pgx 发 NULL。
+	var parentMessageID any
+	if request.ParentMessageID != "" {
+		parentMessageID = request.ParentMessageID
+	}
+
+	message, err := insertEpisodicWithRetry(ctx, tx, func(sp pgx.Tx, messageID string) (service.AssistantMessage, error) {
+		return scanAssistantMessage(sp.QueryRow(ctx, `
+			INSERT INTO agent_memory_episodic (
+				message_id, session_id, user_id, agent_id, seq, parent_message_id, role, status,
+				content, meta_data
+			)
+			VALUES (
+				$1, $2, $3, $4, $5, $6, 'assistant', 'completed', $7,
+				jsonb_build_object('prompt_version', $8::text, 'model', $9::text)
+			)
+			RETURNING message_id::text, user_id, session_id, seq,
+			          COALESCE(content, ''), created_at`,
+			messageID,
+			request.SessionID,
+			request.UserID,
+			service.HealthAgentID,
+			nextSeq,
+			parentMessageID,
+			request.Content,
+			request.PromptVersion,
+			request.ModelName,
+		))
+	})
 	if err != nil {
 		return service.AssistantMessage{}, fmt.Errorf("写入 assistant 消息失败: %w", err)
 	}
 
-	command, err := tx.Exec(ctx, `
-		UPDATE agent_memory_session
-		SET message_count = $3,
-		    last_message_at = $4
-		WHERE session_id = $1
-		  AND user_id = $2`, request.SessionID, request.UserID, nextSeq, message.CreatedAt)
-	if err != nil {
-		return service.AssistantMessage{}, fmt.Errorf("更新会话消息计数失败: %w", err)
-	}
-	if command.RowsAffected() != 1 {
-		return service.AssistantMessage{}, fmt.Errorf("更新会话消息计数影响行数异常: %d", command.RowsAffected())
+	if err := advanceSessionCounters(ctx, tx, request.SessionID, request.UserID, message.CreatedAt); err != nil {
+		return service.AssistantMessage{}, err
 	}
 
 	return message, nil
+}
+
+// advanceSessionCounters 在同一短事务内推进 Session 的序号分配器和消息计数：
+// next_message_seq 只增不减（事务回滚时一并回滚，不消耗序号），message_count 仅作统计。
+func advanceSessionCounters(ctx context.Context, tx pgx.Tx, sessionID, userID string, lastMessageAt time.Time) error {
+	command, err := tx.Exec(ctx, `
+		UPDATE agent_memory_session
+		SET next_message_seq = next_message_seq + 1,
+		    message_count = message_count + 1,
+		    last_message_at = $3
+		WHERE session_id = $1
+		  AND user_id = $2`, sessionID, userID, lastMessageAt)
+	if err != nil {
+		return fmt.Errorf("更新会话序号与计数失败: %w", err)
+	}
+	if command.RowsAffected() != 1 {
+		return fmt.Errorf("更新会话序号与计数影响行数异常: %d", command.RowsAffected())
+	}
+	return nil
+}
+
+// insertEpisodicWithRetry 在 tx 内用 SAVEPOINT 反复尝试：每次生成一个 UUIDv7 message_id 并执行 insert，
+// 仅当命中 message_id 唯一冲突时回滚保存点并重新生成；其它错误直接返回。
+func insertEpisodicWithRetry[T any](ctx context.Context, tx pgx.Tx, insert func(sp pgx.Tx, messageID string) (T, error)) (T, error) {
+	var zero T
+	for attempt := 0; attempt < maxMessageIDAttempts; attempt++ {
+		messageID, err := service.NewMessageID()
+		if err != nil {
+			return zero, err
+		}
+		sp, err := tx.Begin(ctx)
+		if err != nil {
+			return zero, fmt.Errorf("开启 message_id 保存点失败: %w", err)
+		}
+		value, err := insert(sp, messageID)
+		if err != nil {
+			_ = sp.Rollback(ctx)
+			if isMessageIDConflict(err) {
+				continue
+			}
+			return zero, err
+		}
+		if err := sp.Commit(ctx); err != nil {
+			return zero, fmt.Errorf("提交 message_id 保存点失败: %w", err)
+		}
+		return value, nil
+	}
+	return zero, errors.New("连续多次 message_id 唯一冲突，放弃写入")
+}
+
+// isMessageIDConflict 只识别 message_id 相关的唯一冲突，不把 client_message_id / session_seq 等
+// 其它唯一冲突当成可重试的 message_id 碰撞。
+func isMessageIDConflict(err error) bool {
+	var pgError *pgconn.PgError
+	if !errors.As(err, &pgError) || pgError.Code != "23505" {
+		return false
+	}
+	return pgError.ConstraintName == "uk_ame_message_id" || pgError.ConstraintName == "uk_ame_message_user"
 }
 
 // LoadRecent 读取最近的 completed 对话消息，再按 seq 正序返回给上层组装上下文。
@@ -224,12 +278,12 @@ func (r *PostgresMessageRepository) LoadRecent(ctx context.Context, userID, sess
 	return messages, nil
 }
 
-// FindAssistantReplyByID 按 completed turn 保存的结果消息 ID 查询 assistant 回复。
-func (r *PostgresMessageRepository) FindAssistantReplyByID(ctx context.Context, userID, sessionID string, messageID int64) (service.AssistantMessage, bool, error) {
+// FindAssistantReplyByID 按 completed turn 保存的结果消息 UUID 查询 assistant 回复。
+func (r *PostgresMessageRepository) FindAssistantReplyByID(ctx context.Context, userID, sessionID, messageID string) (service.AssistantMessage, bool, error) {
 	message, err := scanAssistantMessage(r.pool.QueryRow(ctx, `
-		SELECT id, user_id, session_id, seq, COALESCE(content, ''), COALESCE(trace_id, ''), created_at
+		SELECT message_id::text, user_id, session_id, seq, COALESCE(content, ''), created_at
 		FROM agent_memory_episodic
-		WHERE id = $1
+		WHERE message_id = $1
 		  AND user_id = $2
 		  AND session_id = $3
 		  AND role = 'assistant'
@@ -249,7 +303,7 @@ func (r *PostgresMessageRepository) FindAssistantReplyByID(ctx context.Context, 
 // 再带一层 user_id 过滤，是防止上层校验被绕过的第二道防线，不是唯一防线。
 func (r *PostgresMessageRepository) ListMessages(ctx context.Context, userID, sessionID string) ([]service.SessionMessage, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT message.id, message.role, COALESCE(message.content, ''), message.seq, message.created_at
+		SELECT message.message_id::text, message.role, COALESCE(message.content, ''), message.seq, message.created_at
 		FROM agent_memory_episodic AS message
 		JOIN agent_memory_session AS session
 		  ON session.session_id = message.session_id
@@ -269,7 +323,7 @@ func (r *PostgresMessageRepository) ListMessages(ctx context.Context, userID, se
 	messages := make([]service.SessionMessage, 0)
 	for rows.Next() {
 		var message service.SessionMessage
-		if err := rows.Scan(&message.ID, &message.Role, &message.Content, &message.Seq, &message.CreatedAt); err != nil {
+		if err := rows.Scan(&message.MessageID, &message.Role, &message.Content, &message.Seq, &message.CreatedAt); err != nil {
 			return nil, fmt.Errorf("扫描会话消息失败: %w", err)
 		}
 		messages = append(messages, message)
@@ -283,13 +337,12 @@ func (r *PostgresMessageRepository) ListMessages(ctx context.Context, userID, se
 func scanUserMessage(row pgx.Row) (service.UserMessage, error) {
 	var message service.UserMessage
 	err := row.Scan(
-		&message.ID,
+		&message.MessageID,
 		&message.UserID,
 		&message.SessionID,
 		&message.ClientMessageID,
 		&message.Seq,
 		&message.Content,
-		&message.TraceID,
 		&message.CreatedAt,
 	)
 	return message, err
@@ -298,12 +351,11 @@ func scanUserMessage(row pgx.Row) (service.UserMessage, error) {
 func scanAssistantMessage(row pgx.Row) (service.AssistantMessage, error) {
 	var message service.AssistantMessage
 	err := row.Scan(
-		&message.ID,
+		&message.MessageID,
 		&message.UserID,
 		&message.SessionID,
 		&message.Seq,
 		&message.Content,
-		&message.TraceID,
 		&message.CreatedAt,
 	)
 	return message, err

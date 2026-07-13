@@ -115,7 +115,7 @@ function formatClock(date: Date): string {
 function mapBackendMessages(items: SessionMessage[]): Message[] {
   if (items.length === 0) return [WELCOME_MESSAGE];
   return items.map((item) => ({
-    id: `srv-${item.id}`,
+    id: `srv-${item.message_id}`,
     type: item.role === "assistant" ? "ai" : "user",
     content: item.content,
     time: formatClock(new Date(item.created_at)),

@@ -46,7 +46,6 @@ func (r *PostgresTurnLeaseRepository) Acquire(ctx context.Context, request servi
 		SessionID:       request.SessionID,
 		ClientMessageID: request.ClientMessageID,
 		Content:         request.Content,
-		TraceID:         request.TraceID,
 	})
 	if errors.Is(err, service.ErrSessionNotFound) {
 		return service.AcquireTurnLeaseResult{}, service.ErrSessionNotFound
@@ -60,7 +59,7 @@ func (r *PostgresTurnLeaseRepository) Acquire(ctx context.Context, request servi
 
 	own, err := scanTurnLease(tx.QueryRow(ctx, `
 		SELECT id, session_id, user_id, client_message_id, status, attempt_no,
-		       COALESCE(user_message_id, 0), COALESCE(result_message_id, 0),
+		       COALESCE(user_message_id::text, ''), COALESCE(result_message_id::text, ''),
 		       lease_expires_at, created_at, updated_at
 		FROM agent_turn_lease
 		WHERE session_id = $1 AND client_message_id = $2
@@ -77,7 +76,7 @@ func (r *PostgresTurnLeaseRepository) Acquire(ctx context.Context, request servi
 
 	other, err := scanTurnLease(tx.QueryRow(ctx, `
 		SELECT id, session_id, user_id, client_message_id, status, attempt_no,
-		       COALESCE(user_message_id, 0), COALESCE(result_message_id, 0),
+		       COALESCE(user_message_id::text, ''), COALESCE(result_message_id::text, ''),
 		       lease_expires_at, created_at, updated_at
 		FROM agent_turn_lease
 		WHERE session_id = $1 AND status = 'active'
@@ -103,9 +102,9 @@ func (r *PostgresTurnLeaseRepository) Acquire(ctx context.Context, request servi
 		)
 		VALUES ($1, $2, $3, 'active', 1, $4, $5)
 		RETURNING id, session_id, user_id, client_message_id, status, attempt_no,
-		          COALESCE(user_message_id, 0), COALESCE(result_message_id, 0),
+		          COALESCE(user_message_id::text, ''), COALESCE(result_message_id::text, ''),
 		          lease_expires_at, created_at, updated_at`,
-		request.SessionID, request.UserID, request.ClientMessageID, messageResult.Message.ID, now.Add(request.LeaseDuration)))
+		request.SessionID, request.UserID, request.ClientMessageID, messageResult.Message.MessageID, now.Add(request.LeaseDuration)))
 	if err != nil {
 		if isForeignKeyViolation(err) {
 			return service.AcquireTurnLeaseResult{}, service.ErrSessionNotFound
@@ -144,9 +143,9 @@ func (r *PostgresTurnLeaseRepository) acquireOwnExisting(
 			SET lease_expires_at = $1, attempt_no = attempt_no + 1, user_message_id = $2
 			WHERE id = $3
 			RETURNING id, session_id, user_id, client_message_id, status, attempt_no,
-			          COALESCE(user_message_id, 0), COALESCE(result_message_id, 0),
+			          COALESCE(user_message_id::text, ''), COALESCE(result_message_id::text, ''),
 			          lease_expires_at, created_at, updated_at`,
-			now.Add(request.LeaseDuration), userMessage.ID, existing.ID))
+			now.Add(request.LeaseDuration), userMessage.MessageID, existing.ID))
 		if err != nil {
 			return service.AcquireTurnLeaseResult{}, fmt.Errorf("续期 turn 租约失败: %w", err)
 		}
@@ -166,9 +165,9 @@ func (r *PostgresTurnLeaseRepository) acquireOwnExisting(
 			SET status = 'active', lease_expires_at = $1, attempt_no = attempt_no + 1, user_message_id = $2
 			WHERE id = $3
 			RETURNING id, session_id, user_id, client_message_id, status, attempt_no,
-			          COALESCE(user_message_id, 0), COALESCE(result_message_id, 0),
+			          COALESCE(user_message_id::text, ''), COALESCE(result_message_id::text, ''),
 			          lease_expires_at, created_at, updated_at`,
-			now.Add(request.LeaseDuration), userMessage.ID, existing.ID))
+			now.Add(request.LeaseDuration), userMessage.MessageID, existing.ID))
 		if err != nil {
 			if isUniqueViolation(err) {
 				return service.AcquireTurnLeaseResult{}, service.ErrTurnLeaseConflict
@@ -214,7 +213,7 @@ func (r *PostgresTurnLeaseRepository) Complete(ctx context.Context, request serv
 
 	lease, err := scanTurnLease(tx.QueryRow(ctx, `
 		SELECT id, session_id, user_id, client_message_id, status, attempt_no,
-		       COALESCE(user_message_id, 0), COALESCE(result_message_id, 0),
+		       COALESCE(user_message_id::text, ''), COALESCE(result_message_id::text, ''),
 		       lease_expires_at, created_at, updated_at
 		FROM agent_turn_lease
 		WHERE session_id = $1 AND user_id = $2 AND client_message_id = $3
@@ -231,13 +230,12 @@ func (r *PostgresTurnLeaseRepository) Complete(ctx context.Context, request serv
 	}
 
 	message, err := appendAssistantMessageTx(ctx, tx, service.AppendAssistantMessageRequest{
-		UserID:        request.UserID,
-		SessionID:     request.SessionID,
-		ParentID:      request.UserMessageID,
-		Content:       request.Content,
-		TraceID:       request.TraceID,
-		PromptVersion: request.PromptVersion,
-		ModelName:     request.ModelName,
+		UserID:          request.UserID,
+		SessionID:       request.SessionID,
+		ParentMessageID: request.UserMessageID,
+		Content:         request.Content,
+		PromptVersion:   request.PromptVersion,
+		ModelName:       request.ModelName,
 	})
 	if err != nil {
 		return service.AssistantMessage{}, err
@@ -247,7 +245,7 @@ func (r *PostgresTurnLeaseRepository) Complete(ctx context.Context, request serv
 		UPDATE agent_turn_lease
 		SET status = 'completed', result_message_id = $1
 		WHERE id = $2 AND status = 'active' AND attempt_no = $3`,
-		message.ID, lease.ID, request.AttemptNo)
+		message.MessageID, lease.ID, request.AttemptNo)
 	if err != nil {
 		return service.AssistantMessage{}, fmt.Errorf("完成 turn 状态失败: %w", err)
 	}

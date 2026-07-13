@@ -1,3 +1,17 @@
+-- ============================================================================
+-- Baseline 000001 · 身份主体
+-- 项目未上线，开发期迁移已压缩为 v2 基线；本文件不再叠加补丁迁移。
+-- 包含：全局 updated_at 触发器函数、用户主体表、Guest 设备凭证表。
+-- ============================================================================
+
+-- updated_at 自动维护函数（全库共用，后续所有表的 updated_at 触发器都复用它）。
+CREATE OR REPLACE FUNCTION set_updated_at() RETURNS trigger AS $$
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 -- 用户身份主体表。认证凭证（Guest token、密码、OAuth）存放在独立凭证表中。
 CREATE TABLE agent_user (
     id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -20,7 +34,6 @@ CREATE TABLE agent_user (
     CONSTRAINT ck_agent_user_username_not_blank CHECK (username IS NULL OR btrim(username) <> '')
 );
 
--- 复用 000001 定义的 set_updated_at() 触发器函数。
 CREATE TRIGGER trg_agent_user_updated_at
     BEFORE UPDATE ON agent_user
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
@@ -37,3 +50,38 @@ COMMENT ON COLUMN agent_user.user_type    IS '账号类型: 0=guest, 1=registere
 COMMENT ON COLUMN agent_user.status       IS '账号状态: 0=active, 1=suspended, 2=deactivated';
 COMMENT ON COLUMN agent_user.auth_version IS '全设备认证版本，递增后旧版本Token全部失效';
 COMMENT ON COLUMN agent_user.deleted_at   IS '软删除时间，NULL表示未删除';
+
+-- Guest 设备凭证表。浏览器只持有 HttpOnly Cookie 中的明文 token，数据库仅保存 SHA-256 hash。
+CREATE TABLE guest_credential (
+    id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id      VARCHAR(64) NOT NULL,
+    token_hash   BYTEA       NOT NULL,
+    expires_at   TIMESTAMPTZ NOT NULL,
+    revoked_at   TIMESTAMPTZ,
+    last_used_at TIMESTAMPTZ,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT uk_guest_credential_token_hash UNIQUE (token_hash),
+    CONSTRAINT fk_guest_credential_user FOREIGN KEY (user_id)
+        REFERENCES agent_user(user_id) ON DELETE RESTRICT,
+    CONSTRAINT ck_guest_credential_hash_length CHECK (octet_length(token_hash) = 32),
+    CONSTRAINT ck_guest_credential_expiry CHECK (expires_at > created_at),
+    CONSTRAINT ck_guest_credential_revoked_at CHECK (revoked_at IS NULL OR revoked_at >= created_at)
+);
+
+CREATE INDEX idx_guest_credential_user_active ON guest_credential (user_id, expires_at DESC)
+    WHERE revoked_at IS NULL;
+CREATE INDEX idx_guest_credential_expiry ON guest_credential (expires_at)
+    WHERE revoked_at IS NULL;
+
+CREATE TRIGGER trg_guest_credential_updated_at
+    BEFORE UPDATE ON guest_credential
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+COMMENT ON TABLE  guest_credential IS 'Guest设备认证凭证，仅保存opaque token的SHA-256 hash';
+COMMENT ON COLUMN guest_credential.user_id      IS '凭证所属的稳定用户业务ID';
+COMMENT ON COLUMN guest_credential.token_hash   IS 'Guest opaque token的SHA-256 hash，禁止保存明文token';
+COMMENT ON COLUMN guest_credential.expires_at   IS '凭证过期时间';
+COMMENT ON COLUMN guest_credential.revoked_at   IS '凭证撤销时间，NULL表示未撤销';
+COMMENT ON COLUMN guest_credential.last_used_at IS '最近一次成功识别该设备的时间';

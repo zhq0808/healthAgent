@@ -17,18 +17,17 @@ type AppendUserMessageRequest struct {
 	SessionID       string
 	ClientMessageID string
 	Content         string
-	TraceID         string
 }
 
-// UserMessage 是已持久化的用户消息。
+// UserMessage 是已持久化的用户消息。MessageID 是后端生成的 UUIDv7 业务身份；
+// 数据库内部行主键 id BIGINT 不进入业务类型。
 type UserMessage struct {
-	ID              int64
+	MessageID       string
 	UserID          string
 	SessionID       string
 	ClientMessageID string
-	Seq             int
+	Seq             int64
 	Content         string
-	TraceID         string
 	CreatedAt       time.Time
 }
 
@@ -39,40 +38,40 @@ type AppendUserMessageResult struct {
 }
 
 // AppendAssistantMessageRequest 是写入完整模型回复所需的可信数据。
+// ParentMessageID 指向本轮 user 消息的 message_id（UUID），为空表示无父消息。
 type AppendAssistantMessageRequest struct {
-	UserID        string
-	SessionID     string
-	ParentID      int64
-	Content       string
-	TraceID       string
-	PromptVersion string
-	ModelName     string
+	UserID          string
+	SessionID       string
+	ParentMessageID string
+	Content         string
+	PromptVersion   string
+	ModelName       string
 }
 
-// AssistantMessage 是已持久化的模型回复。
+// AssistantMessage 是已持久化的模型回复。MessageID 是后端生成的 UUIDv7 业务身份。
 type AssistantMessage struct {
-	ID        int64
+	MessageID string
 	UserID    string
 	SessionID string
-	Seq       int
+	Seq       int64
 	Content   string
-	TraceID   string
 	CreatedAt time.Time
 }
 
 // ConversationMessage 是可进入对话上下文的已完成消息。
 type ConversationMessage struct {
-	Seq     int
+	Seq     int64
 	Role    string
 	Content string
 }
 
 // SessionMessage 是「按会话读消息」接口返回的一条消息，只暴露前端渲染需要的字段。
+// 对外只暴露稳定的 UUID message_id，不暴露数据库内部行主键 id。
 type SessionMessage struct {
-	ID        int64
+	MessageID string
 	Role      string
 	Content   string
-	Seq       int
+	Seq       int64
 	CreatedAt time.Time
 }
 
@@ -81,9 +80,9 @@ type MessageRepository interface {
 	AppendUserMessage(ctx context.Context, request AppendUserMessageRequest) (AppendUserMessageResult, error)
 	AppendAssistantMessage(ctx context.Context, request AppendAssistantMessageRequest) (AssistantMessage, error)
 	LoadRecent(ctx context.Context, userID, sessionID string, limit int) ([]ConversationMessage, error)
-	// FindAssistantReplyByID 按 turn 保存的结果消息 ID 查已完成的 assistant 回复。
+	// FindAssistantReplyByID 按 turn 保存的结果消息 UUID 查已完成的 assistant 回复。
 	// 找不到时返回 (zero, false, nil)，不算错误。
-	FindAssistantReplyByID(ctx context.Context, userID, sessionID string, messageID int64) (AssistantMessage, bool, error)
+	FindAssistantReplyByID(ctx context.Context, userID, sessionID, messageID string) (AssistantMessage, bool, error)
 	// ListMessages 按 seq 升序返回该会话已完成、未删除的 user/assistant 消息；
 	// userID 由调用方传入可信身份，查询本身也按归属过滤（跟上层的会话归属校验形成双重保险）。
 	ListMessages(ctx context.Context, userID, sessionID string) ([]SessionMessage, error)
@@ -124,9 +123,9 @@ func (s *MessageService) LoadRecent(ctx context.Context, userID, sessionID strin
 	return s.repository.LoadRecent(ctx, userID, sessionID, limit)
 }
 
-// FindReplyForTurn 按 completed turn 持久化的 result_message_id 原样恢复结果。
-func (s *MessageService) FindReplyForTurn(ctx context.Context, userID, sessionID string, resultMessageID int64) (AssistantMessage, bool, error) {
-	if resultMessageID <= 0 {
+// FindReplyForTurn 按 completed turn 持久化的 result_message_id（UUID）原样恢复结果。
+func (s *MessageService) FindReplyForTurn(ctx context.Context, userID, sessionID, resultMessageID string) (AssistantMessage, bool, error) {
+	if resultMessageID == "" {
 		return AssistantMessage{}, false, nil
 	}
 	return s.repository.FindAssistantReplyByID(ctx, userID, sessionID, resultMessageID)

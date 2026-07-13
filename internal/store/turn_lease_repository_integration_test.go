@@ -112,7 +112,7 @@ func TestPostgresTurnLeaseRepositoryAcquireAndRelease(t *testing.T) {
 		SessionID:       sessionID,
 		ClientMessageID: firstMessageID,
 		AttemptNo:       first.Lease.AttemptNo,
-		UserMessageID:   first.UserMessage.ID,
+		UserMessageID:   first.UserMessage.MessageID,
 		Content:         "first answer",
 	})
 	if err != nil {
@@ -144,7 +144,7 @@ func TestPostgresTurnLeaseRepositoryAcquireAndRelease(t *testing.T) {
 		t.Fatalf("acquire terminal client_message_id: %v", err)
 	}
 	if terminalHit.Acquired || terminalHit.Lease.Status != service.TurnLeaseCompleted ||
-		terminalHit.Lease.ResultMessageID != firstReply.ID {
+		terminalHit.Lease.ResultMessageID != firstReply.MessageID {
 		t.Fatalf("terminal acquire result = %+v, want not acquired + completed", terminalHit)
 	}
 
@@ -154,7 +154,7 @@ func TestPostgresTurnLeaseRepositoryAcquireAndRelease(t *testing.T) {
 		SessionID:       sessionID,
 		ClientMessageID: secondMessageID,
 		AttemptNo:       second.Lease.AttemptNo,
-		UserMessageID:   second.UserMessage.ID,
+		UserMessageID:   second.UserMessage.MessageID,
 		Content:         "second answer",
 	}); err != nil {
 		t.Fatalf("complete second turn: %v", err)
@@ -205,7 +205,7 @@ func TestPostgresTurnLeaseRepositoryAcquireAndRelease(t *testing.T) {
 		SessionID:       sessionID,
 		ClientMessageID: reclaimMessageID,
 		AttemptNo:       reclaimed.Lease.AttemptNo,
-		UserMessageID:   reclaimed.UserMessage.ID,
+		UserMessageID:   reclaimed.UserMessage.MessageID,
 		Content:         "replacement answer",
 	}); err != nil {
 		t.Fatalf("complete reclaimed turn: %v", err)
@@ -324,7 +324,7 @@ func TestPostgresTurnLeaseRepositoryAcquireReopensFailedLeaseForRetry(t *testing
 		SessionID:       sessionID,
 		ClientMessageID: messageID,
 		AttemptNo:       first.Lease.AttemptNo,
-		UserMessageID:   first.UserMessage.ID,
+		UserMessageID:   first.UserMessage.MessageID,
 		Content:         "stale answer",
 	})
 	if !errors.Is(err, service.ErrTurnLeaseLost) {
@@ -333,7 +333,7 @@ func TestPostgresTurnLeaseRepositoryAcquireReopensFailedLeaseForRetry(t *testing
 	var staleReplyCount int
 	if err := pool.QueryRow(ctx, `
 		SELECT count(*) FROM agent_memory_episodic
-		WHERE session_id = $1 AND parent_id = $2 AND role = 'assistant'`, sessionID, first.UserMessage.ID).Scan(&staleReplyCount); err != nil {
+		WHERE session_id = $1 AND parent_message_id = $2 AND role = 'assistant'`, sessionID, first.UserMessage.MessageID).Scan(&staleReplyCount); err != nil {
 		t.Fatalf("count stale replies: %v", err)
 	}
 	if staleReplyCount != 0 {
@@ -345,7 +345,7 @@ func TestPostgresTurnLeaseRepositoryAcquireReopensFailedLeaseForRetry(t *testing
 		SessionID:       sessionID,
 		ClientMessageID: messageID,
 		AttemptNo:       retry.Lease.AttemptNo,
-		UserMessageID:   retry.UserMessage.ID,
+		UserMessageID:   retry.UserMessage.MessageID,
 		Content:         "retry answer",
 	}); err != nil {
 		t.Fatalf("complete after retry: %v", err)

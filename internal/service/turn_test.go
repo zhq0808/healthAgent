@@ -130,14 +130,14 @@ func TestTurnLeaseServiceReleasePassesThroughRepository(t *testing.T) {
 }
 
 func TestTurnLeaseServiceCompletePassesFencingIdentifiers(t *testing.T) {
-	repository := &fakeTurnLeaseRepository{completeResult: AssistantMessage{ID: 9}}
+	repository := &fakeTurnLeaseRepository{completeResult: AssistantMessage{MessageID: "am-9"}}
 	turnLeaseService := NewTurnLeaseService(repository)
 	request := CompleteTurnRequest{
 		UserID:          "usr_owner",
 		SessionID:       "session_owner",
 		ClientMessageID: "00000000-0000-4000-8000-000000000006",
 		AttemptNo:       2,
-		UserMessageID:   7,
+		UserMessageID:   "um-7",
 		Content:         "reply",
 	}
 
@@ -145,7 +145,7 @@ func TestTurnLeaseServiceCompletePassesFencingIdentifiers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Complete() error = %v", err)
 	}
-	if result.ID != 9 || repository.lastCompleteReq != request {
+	if result.MessageID != "am-9" || repository.lastCompleteReq != request {
 		t.Fatalf("Complete() result=%+v request=%+v", result, repository.lastCompleteReq)
 	}
 }

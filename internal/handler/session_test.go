@@ -167,8 +167,8 @@ func TestListSessionMessagesHandlerReturnsOwnedSessionMessages(t *testing.T) {
 	const sessionID = "session_0123456789abcdef0123456789abcdef"
 	messageRepository := &handlerMessageRepository{
 		sessionMessages: []service.SessionMessage{
-			{ID: 1, Role: "user", Content: "早上体检报告有点异常", Seq: 1},
-			{ID: 2, Role: "assistant", Content: "具体是哪项指标异常呢？", Seq: 2},
+			{MessageID: "m1", Role: "user", Content: "早上体检报告有点异常", Seq: 1},
+			{MessageID: "m2", Role: "assistant", Content: "具体是哪项指标异常呢？", Seq: 2},
 		},
 	}
 	server := &Server{
@@ -198,7 +198,7 @@ func TestListSessionMessagesHandlerAllowsArchivedOwnedSession(t *testing.T) {
 			inactive: map[string]bool{sessionID: true},
 		}),
 		messages: service.NewMessageService(&handlerMessageRepository{
-			sessionMessages: []service.SessionMessage{{ID: 1, Role: "user", Content: "归档消息", Seq: 1}},
+			sessionMessages: []service.SessionMessage{{MessageID: "m1", Role: "user", Content: "归档消息", Seq: 1}},
 		}),
 		log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
@@ -215,7 +215,7 @@ func TestListSessionMessagesHandlerAllowsArchivedOwnedSession(t *testing.T) {
 func TestListSessionMessagesHandlerReturnsNotFoundForOtherUsersSession(t *testing.T) {
 	const sessionID = "session_0123456789abcdef0123456789abcdef"
 	messageRepository := &handlerMessageRepository{
-		sessionMessages: []service.SessionMessage{{ID: 1, Role: "user", Content: "别人的健康问题", Seq: 1}},
+		sessionMessages: []service.SessionMessage{{MessageID: "m1", Role: "user", Content: "别人的健康问题", Seq: 1}},
 	}
 	server := &Server{
 		sessions: service.NewSessionService(&handlerSessionRepository{owners: map[string]string{sessionID: "usr_other"}}),

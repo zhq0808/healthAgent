@@ -1,1 +1,0 @@
-DROP INDEX IF EXISTS idx_sess_user_last_message;

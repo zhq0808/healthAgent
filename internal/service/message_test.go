@@ -12,7 +12,7 @@ type fakeMessageRepository struct {
 	history         []ConversationMessage
 	reply           AssistantMessage
 	replyFound      bool
-	lastFindReplyID int64
+	lastFindReplyID string
 	sessionMessages []SessionMessage
 	err             error
 }
@@ -29,7 +29,7 @@ func (r *fakeMessageRepository) LoadRecent(_ context.Context, _, _ string, _ int
 	return r.history, r.err
 }
 
-func (r *fakeMessageRepository) FindAssistantReplyByID(_ context.Context, _, _ string, messageID int64) (AssistantMessage, bool, error) {
+func (r *fakeMessageRepository) FindAssistantReplyByID(_ context.Context, _, _, messageID string) (AssistantMessage, bool, error) {
 	r.lastFindReplyID = messageID
 	return r.reply, r.replyFound, r.err
 }
@@ -92,22 +92,22 @@ func TestMessageServiceFindReplyForTurnQueriesPersistedResultID(t *testing.T) {
 	repository := &fakeMessageRepository{reply: AssistantMessage{Content: "answer"}, replyFound: true}
 	messageService := NewMessageService(repository)
 
-	reply, found, err := messageService.FindReplyForTurn(t.Context(), "usr_owner", "session_owner", 99)
+	reply, found, err := messageService.FindReplyForTurn(t.Context(), "usr_owner", "session_owner", "msg-99")
 	if err != nil {
 		t.Fatalf("FindReplyForTurn() error = %v", err)
 	}
 	if !found || reply.Content != "answer" {
 		t.Fatalf("FindReplyForTurn() = %+v, %v, want found answer", reply, found)
 	}
-	if repository.lastFindReplyID != 99 {
-		t.Fatalf("queried message id = %d, want 99", repository.lastFindReplyID)
+	if repository.lastFindReplyID != "msg-99" {
+		t.Fatalf("queried message id = %q, want msg-99", repository.lastFindReplyID)
 	}
 }
 
 func TestMessageServiceFindReplyForTurnReportsNotFound(t *testing.T) {
 	messageService := NewMessageService(&fakeMessageRepository{replyFound: false})
 
-	_, found, err := messageService.FindReplyForTurn(t.Context(), "usr_owner", "session_owner", 5)
+	_, found, err := messageService.FindReplyForTurn(t.Context(), "usr_owner", "session_owner", "msg-5")
 	if err != nil {
 		t.Fatalf("FindReplyForTurn() error = %v", err)
 	}
@@ -118,8 +118,8 @@ func TestMessageServiceFindReplyForTurnReportsNotFound(t *testing.T) {
 
 func TestMessageServiceListMessagesReturnsRepositoryResult(t *testing.T) {
 	repository := &fakeMessageRepository{sessionMessages: []SessionMessage{
-		{ID: 1, Role: "user", Content: "hi", Seq: 1},
-		{ID: 2, Role: "assistant", Content: "hello", Seq: 2},
+		{MessageID: "m1", Role: "user", Content: "hi", Seq: 1},
+		{MessageID: "m2", Role: "assistant", Content: "hello", Seq: 2},
 	}}
 	messageService := NewMessageService(repository)
 

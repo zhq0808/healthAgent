@@ -82,12 +82,13 @@ func (s *Server) listSessionsHandler(c *gin.Context) {
 	ok(c, reply)
 }
 
-// sessionMessageReply 是会话消息列表接口的单项 DTO。
+// sessionMessageReply 是会话消息列表接口的单项 DTO。对外只暴露稳定的 UUID message_id，
+// 不暴露数据库内部行主键 id，也不暴露 turn lease 状态记录。
 type sessionMessageReply struct {
-	ID        int64  `json:"id"`
+	MessageID string `json:"message_id"`
 	Role      string `json:"role"`
 	Content   string `json:"content"`
-	Seq       int    `json:"seq"`
+	Seq       int64  `json:"seq"`
 	CreatedAt string `json:"created_at"`
 }
 
@@ -125,7 +126,7 @@ func (s *Server) listSessionMessagesHandler(c *gin.Context) {
 	reply := make([]sessionMessageReply, 0, len(messages))
 	for _, message := range messages {
 		reply = append(reply, sessionMessageReply{
-			ID:        message.ID,
+			MessageID: message.MessageID,
 			Role:      message.Role,
 			Content:   message.Content,
 			Seq:       message.Seq,

@@ -115,7 +115,6 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 		SessionID:       req.SessionID,
 		ClientMessageID: req.ClientMessageID,
 		Content:         strings.TrimSpace(req.Message),
-		TraceID:         TraceIDFromContext(c.Request.Context()),
 	})
 	if errors.Is(err, service.ErrClientMessageConflict) {
 		fail(c, http.StatusConflict, CodeConflict, "客户端消息ID已用于其他内容")
@@ -142,10 +141,11 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 		return
 	}
 	if !leaseResult.Acquired {
-		if leaseResult.Lease.Status != service.TurnLeaseCompleted || leaseResult.Lease.ResultMessageID <= 0 {
+		if leaseResult.Lease.Status != service.TurnLeaseCompleted || leaseResult.Lease.ResultMessageID == "" {
 			s.log.Error("completed turn 缺少结果消息",
 				"trace_id", TraceIDFromContext(c.Request.Context()),
-				"turn_id", leaseResult.Lease.ID,
+				"session_id", req.SessionID,
+				"client_message_id", req.ClientMessageID,
 			)
 			fail(c, http.StatusInternalServerError, CodeInternal, "对话服务暂时不可用")
 			return
@@ -211,9 +211,8 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 			SessionID:       req.SessionID,
 			ClientMessageID: req.ClientMessageID,
 			AttemptNo:       leaseResult.Lease.AttemptNo,
-			UserMessageID:   leaseResult.UserMessage.ID,
+			UserMessageID:   leaseResult.UserMessage.MessageID,
 			Content:         content,
-			TraceID:         TraceIDFromContext(c.Request.Context()),
 			PromptVersion:   s.chat.PromptVersion(),
 			ModelName:       s.chat.ModelName(),
 		}); err != nil {
@@ -262,7 +261,7 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 //
 // userMessageSeq 是这条用户消息自己的 seq；由于一个 Session 同一时刻最多一个进行中的 turn
 // （turn 租约保证），它的回复必然是 seq 恰好比它大 1 的那条 assistant 消息。
-func (s *Server) replayCompletedTurn(c *gin.Context, userID, sessionID string, resultMessageID int64) {
+func (s *Server) replayCompletedTurn(c *gin.Context, userID, sessionID string, resultMessageID string) {
 	reply, found, err := s.messages.FindReplyForTurn(c.Request.Context(), userID, sessionID, resultMessageID)
 	if err != nil {
 		s.log.Error("查询待回放的 assistant 回复失败",
@@ -277,7 +276,8 @@ func (s *Server) replayCompletedTurn(c *gin.Context, userID, sessionID string, r
 		// 按服务不可用处理，不能凭空编一个回复，也不能重新调用 LLM 掩盖这个异常。
 		s.log.Error("turn 租约状态为 completed，但找不到对应的 assistant 回复",
 			"trace_id", TraceIDFromContext(c.Request.Context()),
-			"result_message_id", resultMessageID,
+			"session_id", sessionID,
+			"message_id", resultMessageID,
 		)
 		fail(c, http.StatusInternalServerError, CodeInternal, "对话服务暂时不可用")
 		return

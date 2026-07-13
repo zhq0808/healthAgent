@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -58,7 +58,6 @@ func TestPostgresMessageRepositoryAppendsUserMessagesIdempotently(t *testing.T) 
 		SessionID:       sessionID,
 		ClientMessageID: "00000000-0000-4000-8000-000000000073",
 		Content:         "first message",
-		TraceID:         "trace-first",
 	}
 	first, err := messageService.AppendUserMessage(ctx, firstRequest)
 	if err != nil {
@@ -72,8 +71,8 @@ func TestPostgresMessageRepositoryAppendsUserMessagesIdempotently(t *testing.T) 
 	if err != nil {
 		t.Fatalf("retry first message: %v", err)
 	}
-	if retried.Created || retried.Message.ID != first.Message.ID {
-		t.Fatalf("retry result = %+v, want existing message %d", retried, first.Message.ID)
+	if retried.Created || retried.Message.MessageID != first.Message.MessageID {
+		t.Fatalf("retry result = %+v, want existing message %s", retried, first.Message.MessageID)
 	}
 
 	conflicting := firstRequest
@@ -83,7 +82,7 @@ func TestPostgresMessageRepositoryAppendsUserMessagesIdempotently(t *testing.T) 
 	}
 
 	const concurrentMessages = 8
-	seqs := make(chan int, concurrentMessages)
+	seqs := make(chan int64, concurrentMessages)
 	errorsChannel := make(chan error, concurrentMessages)
 	var waitGroup sync.WaitGroup
 	for index := 0; index < concurrentMessages; index++ {
@@ -95,7 +94,6 @@ func TestPostgresMessageRepositoryAppendsUserMessagesIdempotently(t *testing.T) 
 				SessionID:       sessionID,
 				ClientMessageID: fmt.Sprintf("00000000-0000-4000-8000-%012d", messageIndex+100),
 				Content:         fmt.Sprintf("message %d", messageIndex),
-				TraceID:         fmt.Sprintf("trace-%d", messageIndex),
 			})
 			if appendErr != nil {
 				errorsChannel <- appendErr
@@ -114,13 +112,13 @@ func TestPostgresMessageRepositoryAppendsUserMessagesIdempotently(t *testing.T) 
 		return
 	}
 
-	actualSeqs := []int{first.Message.Seq}
+	actualSeqs := []int64{first.Message.Seq}
 	for seq := range seqs {
 		actualSeqs = append(actualSeqs, seq)
 	}
-	sort.Ints(actualSeqs)
+	slices.Sort(actualSeqs)
 	for index, seq := range actualSeqs {
-		if seq != index+1 {
+		if seq != int64(index+1) {
 			t.Fatalf("seqs = %v, want continuous 1..%d", actualSeqs, concurrentMessages+1)
 		}
 	}
@@ -185,15 +183,15 @@ func TestPostgresMessageRepositoryLoadsRecentCompletedHistory(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO agent_memory_episodic
-			(session_id, user_id, agent_id, seq, role, status, content, deleted_at)
+			(message_id, session_id, user_id, agent_id, seq, role, status, content, deleted_at)
 		VALUES
-			($1, $2, 'health-agent', 1, 'user',      'completed', 'old user',          NULL),
-			($1, $2, 'health-agent', 2, 'assistant', 'completed', 'old assistant',     NULL),
-			($1, $2, 'health-agent', 3, 'system',    'completed', 'hidden system',     NULL),
-			($1, $2, 'health-agent', 4, 'user',      'failed',    'hidden failed',     NULL),
-			($1, $2, 'health-agent', 5, 'assistant', 'completed', 'hidden deleted',    now()),
-			($1, $2, 'health-agent', 6, 'user',      'completed', 'latest user',       NULL),
-			($3, $2, 'health-agent', 1, 'user',      'completed', 'hidden session',    NULL)`, sessionID, userID, deletedSession); err != nil {
+			(gen_random_uuid(), $1, $2, 'health-agent', 1, 'user',      'completed', 'old user',          NULL),
+			(gen_random_uuid(), $1, $2, 'health-agent', 2, 'assistant', 'completed', 'old assistant',     NULL),
+			(gen_random_uuid(), $1, $2, 'health-agent', 3, 'system',    'completed', 'hidden system',     NULL),
+			(gen_random_uuid(), $1, $2, 'health-agent', 4, 'user',      'failed',    'hidden failed',     NULL),
+			(gen_random_uuid(), $1, $2, 'health-agent', 5, 'assistant', 'completed', 'hidden deleted',    now()),
+			(gen_random_uuid(), $1, $2, 'health-agent', 6, 'user',      'completed', 'latest user',       NULL),
+			(gen_random_uuid(), $3, $2, 'health-agent', 1, 'user',      'completed', 'hidden session',    NULL)`, sessionID, userID, deletedSession); err != nil {
 		t.Fatalf("insert history fixtures: %v", err)
 	}
 
@@ -297,7 +295,6 @@ func TestPostgresMessageRepositoryAppendsAssistantInSequence(t *testing.T) {
 		SessionID:       sessionID,
 		ClientMessageID: "00000000-0000-4000-8000-000000000075",
 		Content:         "user question",
-		TraceID:         "trace-user",
 	})
 	if err != nil {
 		t.Fatalf("append user message: %v", err)
@@ -306,7 +303,6 @@ func TestPostgresMessageRepositoryAppendsAssistantInSequence(t *testing.T) {
 		UserID:    userID,
 		SessionID: sessionID,
 		Content:   "assistant answer",
-		TraceID:   "trace-assistant",
 	})
 	if err != nil {
 		t.Fatalf("append assistant message: %v", err)
@@ -317,20 +313,20 @@ func TestPostgresMessageRepositoryAppendsAssistantInSequence(t *testing.T) {
 
 	var messageCount int
 	var assistantClientMessageID *string
-	var assistantParentID *int64
+	var assistantParentMessageID *string
 	if err := pool.QueryRow(ctx, `
-		SELECT session.message_count, episodic.client_message_id::text, episodic.parent_id
+		SELECT session.message_count, episodic.client_message_id::text, episodic.parent_message_id::text
 		FROM agent_memory_session AS session
 		JOIN agent_memory_episodic AS episodic
 		  ON episodic.session_id = session.session_id
 		 AND episodic.user_id = session.user_id
 		WHERE session.session_id = $1
 		  AND session.user_id = $2
-		  AND episodic.id = $3`, sessionID, userID, assistant.ID).Scan(&messageCount, &assistantClientMessageID, &assistantParentID); err != nil {
+		  AND episodic.message_id = $3`, sessionID, userID, assistant.MessageID).Scan(&messageCount, &assistantClientMessageID, &assistantParentMessageID); err != nil {
 		t.Fatalf("query assistant persistence: %v", err)
 	}
-	if messageCount != 2 || assistantClientMessageID != nil || assistantParentID != nil {
-		t.Fatalf("message_count=%d client_message_id=%v parent_id=%v, want 2, NULL and NULL", messageCount, assistantClientMessageID, assistantParentID)
+	if messageCount != 2 || assistantClientMessageID != nil || assistantParentMessageID != nil {
+		t.Fatalf("message_count=%d client_message_id=%v parent_message_id=%v, want 2, NULL and NULL", messageCount, assistantClientMessageID, assistantParentMessageID)
 	}
 }
 

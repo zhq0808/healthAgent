@@ -29,6 +29,8 @@ const (
 const DefaultTurnLeaseDuration = 45 * time.Second
 
 // TurnLease 是当前持有（或历史命中）的一条 turn 租约记录。
+// ID 是租约表自己的数据库内部主键，仅服务端内部使用，不向客户端暴露；
+// UserMessageID/ResultMessageID 是消息的 UUID 业务身份（关联 episodic.message_id）。
 type TurnLease struct {
 	ID              int64
 	SessionID       string
@@ -36,8 +38,8 @@ type TurnLease struct {
 	ClientMessageID string
 	Status          TurnLeaseStatus
 	AttemptNo       int64
-	UserMessageID   int64
-	ResultMessageID int64
+	UserMessageID   string
+	ResultMessageID string
 	LeaseExpiresAt  time.Time
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
@@ -49,7 +51,6 @@ type AcquireTurnLeaseRequest struct {
 	SessionID       string
 	ClientMessageID string
 	Content         string
-	TraceID         string
 	LeaseDuration   time.Duration
 }
 
@@ -65,14 +66,14 @@ type AcquireTurnLeaseResult struct {
 }
 
 // CompleteTurnRequest 把当前 attempt 的 assistant 结果落库并将 turn 原子推进到 completed。
+// UserMessageID 是本轮 user 消息的 UUID message_id。
 type CompleteTurnRequest struct {
 	UserID          string
 	SessionID       string
 	ClientMessageID string
 	AttemptNo       int64
-	UserMessageID   int64
+	UserMessageID   string
 	Content         string
-	TraceID         string
 	PromptVersion   string
 	ModelName       string
 }
@@ -116,7 +117,7 @@ func (s *TurnLeaseService) Acquire(ctx context.Context, request AcquireTurnLease
 // Complete 在一个短事务中写入 assistant 结果并完成 turn；attempt_no 防止旧执行者晚到覆盖。
 func (s *TurnLeaseService) Complete(ctx context.Context, request CompleteTurnRequest) (AssistantMessage, error) {
 	if request.UserID == "" || request.SessionID == "" || request.ClientMessageID == "" ||
-		request.AttemptNo <= 0 || request.UserMessageID <= 0 {
+		request.AttemptNo <= 0 || request.UserMessageID == "" {
 		return AssistantMessage{}, errors.New("完成 turn 缺少必要标识")
 	}
 	if request.Content == "" {

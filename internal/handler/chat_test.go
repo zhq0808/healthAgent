@@ -51,7 +51,7 @@ func (r *handlerMessageRepository) LoadRecent(_ context.Context, _, _ string, _ 
 	return r.history, nil
 }
 
-func (r *handlerMessageRepository) FindAssistantReplyByID(_ context.Context, _, _ string, _ int64) (service.AssistantMessage, bool, error) {
+func (r *handlerMessageRepository) FindAssistantReplyByID(_ context.Context, _, _, _ string) (service.AssistantMessage, bool, error) {
 	r.findReplyCalls++
 	return r.reply, r.replyFound, r.replyErr
 }
@@ -78,8 +78,8 @@ func (r *handlerTurnLeaseRepository) Acquire(_ context.Context, _ service.Acquir
 		if r.acquireResult.Lease.AttemptNo == 0 {
 			r.acquireResult.Lease.AttemptNo = 1
 		}
-		if r.acquireResult.UserMessage.ID == 0 {
-			r.acquireResult.UserMessage.ID = 42
+		if r.acquireResult.UserMessage.MessageID == "" {
+			r.acquireResult.UserMessage.MessageID = "um-42"
 		}
 	}
 	return r.acquireResult, r.acquireErr
@@ -88,7 +88,7 @@ func (r *handlerTurnLeaseRepository) Acquire(_ context.Context, _ service.Acquir
 func (r *handlerTurnLeaseRepository) Complete(_ context.Context, request service.CompleteTurnRequest) (service.AssistantMessage, error) {
 	r.completeCalls++
 	r.lastComplete = request
-	return service.AssistantMessage{ID: 99, Content: request.Content}, r.completeErr
+	return service.AssistantMessage{MessageID: "am-99", Content: request.Content}, r.completeErr
 }
 
 func (r *handlerTurnLeaseRepository) Release(_ context.Context, request service.ReleaseTurnLeaseRequest) error {
@@ -142,7 +142,7 @@ func (w *brokenAfterNWriter) WriteString(s string) (int, error) {
 func TestChatStreamHandlerBeginsAndCompletesTurnAroundModelCall(t *testing.T) {
 	messageRepository := &handlerMessageRepository{
 		result: service.AppendUserMessageResult{
-			Message: service.UserMessage{ID: 42},
+			Message: service.UserMessage{MessageID: "um-42"},
 			Created: true,
 		},
 		history: []service.ConversationMessage{
@@ -173,7 +173,7 @@ func TestChatStreamHandlerBeginsAndCompletesTurnAroundModelCall(t *testing.T) {
 	if len(chatModel.messages) != 4 || chatModel.messages[3] != (llm.Message{Role: "user", Content: "hello"}) {
 		t.Fatalf("model messages=%+v, want system plus ordered history", chatModel.messages)
 	}
-	if turnLeaseRepository.completeCalls != 1 || turnLeaseRepository.lastComplete.UserMessageID != 42 ||
+	if turnLeaseRepository.completeCalls != 1 || turnLeaseRepository.lastComplete.UserMessageID != "um-42" ||
 		turnLeaseRepository.lastComplete.Content != "reply" ||
 		turnLeaseRepository.lastComplete.PromptVersion != "handler-test-v2" ||
 		turnLeaseRepository.lastComplete.ModelName != "handler-test-model" {
@@ -186,7 +186,7 @@ func TestChatStreamHandlerBeginsAndCompletesTurnAroundModelCall(t *testing.T) {
 func TestChatStreamHandlerReplaysCompletedReplyForIdempotentRetryWithoutCallingModel(t *testing.T) {
 	messageRepository := &handlerMessageRepository{
 		result: service.AppendUserMessageResult{
-			Message: service.UserMessage{ID: 42, Seq: 3, Content: "hello"},
+			Message: service.UserMessage{MessageID: "um-42", Seq: 3, Content: "hello"},
 			Created: false,
 		},
 		reply:      service.AssistantMessage{Content: "previous reply"},
@@ -195,7 +195,7 @@ func TestChatStreamHandlerReplaysCompletedReplyForIdempotentRetryWithoutCallingM
 	chatModel := &handlerChatModel{}
 	turnLeaseRepository := &handlerTurnLeaseRepository{
 		acquireResult: service.AcquireTurnLeaseResult{
-			Lease:    service.TurnLease{Status: service.TurnLeaseCompleted, ResultMessageID: 99},
+			Lease:    service.TurnLease{Status: service.TurnLeaseCompleted, ResultMessageID: "am-99"},
 			Acquired: false,
 		},
 	}
@@ -235,7 +235,7 @@ func TestChatStreamHandlerReplaysCompletedReplyForIdempotentRetryWithoutCallingM
 func TestChatStreamHandlerFailsWhenCompletedReplyIsMissing(t *testing.T) {
 	messageRepository := &handlerMessageRepository{
 		result: service.AppendUserMessageResult{
-			Message: service.UserMessage{ID: 42, Seq: 3, Content: "hello"},
+			Message: service.UserMessage{MessageID: "um-42", Seq: 3, Content: "hello"},
 			Created: false,
 		},
 		replyFound: false,
@@ -243,7 +243,7 @@ func TestChatStreamHandlerFailsWhenCompletedReplyIsMissing(t *testing.T) {
 	chatModel := &handlerChatModel{}
 	turnLeaseRepository := &handlerTurnLeaseRepository{
 		acquireResult: service.AcquireTurnLeaseResult{
-			Lease:    service.TurnLease{Status: service.TurnLeaseCompleted, ResultMessageID: 99},
+			Lease:    service.TurnLease{Status: service.TurnLeaseCompleted, ResultMessageID: "am-99"},
 			Acquired: false,
 		},
 	}
@@ -285,7 +285,7 @@ func TestChatStreamHandlerRejectsInvalidClientMessageID(t *testing.T) {
 func TestChatStreamHandlerSendsErrorInsteadOfDoneWhenAssistantPersistenceFails(t *testing.T) {
 	messageRepository := &handlerMessageRepository{
 		result: service.AppendUserMessageResult{
-			Message: service.UserMessage{ID: 42},
+			Message: service.UserMessage{MessageID: "um-42"},
 			Created: true,
 		},
 	}
@@ -317,7 +317,7 @@ func TestChatStreamHandlerSendsErrorInsteadOfDoneWhenAssistantPersistenceFails(t
 func TestChatStreamHandlerReturnsConflictWhenTurnLeaseHeldBySomeoneElse(t *testing.T) {
 	messageRepository := &handlerMessageRepository{
 		result: service.AppendUserMessageResult{
-			Message: service.UserMessage{ID: 42},
+			Message: service.UserMessage{MessageID: "um-42"},
 			Created: true,
 		},
 	}
@@ -348,7 +348,7 @@ func TestChatStreamHandlerReturnsConflictWhenTurnLeaseHeldBySomeoneElse(t *testi
 func TestChatStreamHandlerCompletesTurnAtomicallyOnNormalSuccess(t *testing.T) {
 	messageRepository := &handlerMessageRepository{
 		result: service.AppendUserMessageResult{
-			Message: service.UserMessage{ID: 42},
+			Message: service.UserMessage{MessageID: "um-42"},
 			Created: true,
 		},
 	}
@@ -374,7 +374,7 @@ func TestChatStreamHandlerCompletesTurnAtomicallyOnNormalSuccess(t *testing.T) {
 func TestChatStreamHandlerReleasesLeaseAsFailedWhenModelStreamFails(t *testing.T) {
 	messageRepository := &handlerMessageRepository{
 		result: service.AppendUserMessageResult{
-			Message: service.UserMessage{ID: 42},
+			Message: service.UserMessage{MessageID: "um-42"},
 			Created: true,
 		},
 	}
@@ -407,7 +407,7 @@ func TestChatStreamHandlerReleasesLeaseAsFailedWhenModelStreamFails(t *testing.T
 func TestChatStreamHandlerPersistsFallbackReplyWhenModelNotConfigured(t *testing.T) {
 	messageRepository := &handlerMessageRepository{
 		result: service.AppendUserMessageResult{
-			Message: service.UserMessage{ID: 42},
+			Message: service.UserMessage{MessageID: "um-42"},
 			Created: true,
 		},
 	}
@@ -442,7 +442,7 @@ func TestChatStreamHandlerPersistsFallbackReplyWhenModelNotConfigured(t *testing
 func TestChatStreamHandlerSendsErrorWhenFallbackReplyPersistenceFails(t *testing.T) {
 	messageRepository := &handlerMessageRepository{
 		result: service.AppendUserMessageResult{
-			Message: service.UserMessage{ID: 42},
+			Message: service.UserMessage{MessageID: "um-42"},
 			Created: true,
 		},
 	}
@@ -476,7 +476,7 @@ func TestChatStreamHandlerSendsErrorWhenFallbackReplyPersistenceFails(t *testing
 func TestChatStreamHandlerFailsTurnWhenModelProducesEmptyReply(t *testing.T) {
 	messageRepository := &handlerMessageRepository{
 		result: service.AppendUserMessageResult{
-			Message: service.UserMessage{ID: 42},
+			Message: service.UserMessage{MessageID: "um-42"},
 			Created: true,
 		},
 	}
@@ -509,7 +509,7 @@ func TestChatStreamHandlerFailsTurnWhenModelProducesEmptyReply(t *testing.T) {
 func TestChatStreamHandlerFailsTurnWhenClientDisconnectsMidStream(t *testing.T) {
 	messageRepository := &handlerMessageRepository{
 		result: service.AppendUserMessageResult{
-			Message: service.UserMessage{ID: 42},
+			Message: service.UserMessage{MessageID: "um-42"},
 			Created: true,
 		},
 	}

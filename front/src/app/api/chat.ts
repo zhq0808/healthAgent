@@ -27,8 +27,9 @@ export interface SessionListItem {
 }
 
 // SessionMessage 对应后端 GET /api/v1/sessions/:session_id/messages 的单项返回。
+// message_id 是后端生成的稳定 UUID 业务身份（不暴露数据库内部行主键）。
 export interface SessionMessage {
-  id: number;
+  message_id: string;
   role: string;
   content: string;
   seq: number;
