@@ -88,7 +88,6 @@ func run() error {
 	const writeTimeout = 60 * time.Second
 
 	// 4. 在 composition root 组装业务服务；HTTP handler 只依赖 service。
-	chatService := service.NewChatService(client, prompt, cfg.Chat.MaxReplyChars)
 	identityRepository := store.NewPostgresIdentityRepository(db)
 	identityService := service.NewIdentityService(identityRepository, time.Duration(cfg.Identity.GuestTokenTTLHours)*time.Hour)
 	sessionRepository := store.NewPostgresSessionRepository(db)
@@ -97,7 +96,57 @@ func run() error {
 	messageService := service.NewMessageService(messageRepository)
 	turnLeaseRepository := store.NewPostgresTurnLeaseRepository(db)
 	turnLeaseService := service.NewTurnLeaseService(turnLeaseRepository)
-	srvHandler := handler.NewServer(chatService, identityService, sessionService, messageService, turnLeaseService, cfg.Identity, log).Handler()
+	memoryRepository := store.NewPostgresMemoryRepository(db)
+	memoryService := service.NewMemoryService(memoryRepository, service.MemoryExtractionLimits{
+		MaxOperations:       cfg.Memory.MaxOperations,
+		MaxMemoryValueChars: cfg.Memory.MaxMemoryValueChars,
+		MinConfidence:       cfg.Memory.MinConfidence,
+	})
+	chatService := service.NewChatService(client, prompt, memoryService, service.MemoryBudget{
+		MaxCount: cfg.Memory.MaxMemoryInput,
+		MaxChars: cfg.Memory.MaxMemoryInputChars,
+	}, cfg.Chat.MaxReplyChars)
+
+	// 记忆抽取使用独立模型实例和 Prompt，后续调优只替换模板与版本，不改异步管道。
+	var memoryPipeline *service.MemoryPipeline
+	if cfg.Memory.Enabled {
+		memoryClient := llm.NewDeepSeekClient(
+			cfg.DeepSeek.APIKey,
+			cfg.DeepSeek.BaseURL,
+			cfg.Memory.ExtractorModel,
+			0,
+			time.Duration(cfg.Memory.ExtractTimeoutSeconds)*time.Second,
+		)
+		memoryExtractor, err := service.LoadLLMMemoryExtractor(
+			cfg.Memory.ExtractorPromptPath,
+			cfg.Memory.ExtractorVersion,
+			memoryClient,
+		)
+		if err != nil {
+			return err
+		}
+		memoryPipeline, err = service.NewMemoryPipeline(
+			memoryService,
+			memoryRepository,
+			memoryExtractor,
+			memoryPipelineConfig(cfg.Memory),
+			log,
+		)
+		if err != nil {
+			return err
+		}
+		memoryPipeline.Start()
+		log.Info("记忆抽取管道已启动", "workers", cfg.Memory.WorkerCount, "queue", cfg.Memory.QueueSize, "prompt_version", cfg.Memory.ExtractorVersion)
+		defer func() {
+			if err := memoryPipeline.Close(); err != nil {
+				log.Warn("记忆抽取管道关闭异常", "error", err)
+			}
+		}()
+	} else {
+		log.Info("记忆抽取管道未启用（MEMORY_ENABLED=false）")
+	}
+
+	srvHandler := handler.NewServer(chatService, identityService, sessionService, messageService, turnLeaseService, memoryPipeline, cfg.Identity, log).Handler()
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTP.Port,
 		Handler:           srvHandler,
@@ -139,4 +188,26 @@ func run() error {
 
 	log.Info("服务已优雅关闭")
 	return nil
+}
+
+// memoryPipelineConfig 把配置里的秒级参数转成抽取管道所需的 time.Duration 参数。
+func memoryPipelineConfig(cfg config.MemoryConfig) service.MemoryPipelineConfig {
+	return service.MemoryPipelineConfig{
+		WorkerCount:      cfg.WorkerCount,
+		QueueSize:        cfg.QueueSize,
+		ScanInterval:     time.Duration(cfg.ScanIntervalSeconds) * time.Second,
+		LeaseDuration:    time.Duration(cfg.LeaseDurationSeconds) * time.Second,
+		ExtractTimeout:   time.Duration(cfg.ExtractTimeoutSeconds) * time.Second,
+		TaskTimeout:      time.Duration(cfg.TaskTimeoutSeconds) * time.Second,
+		ScanBatchSize:    cfg.ScanBatchSize,
+		MaxBatchMessages: cfg.MaxBatchMessages,
+		MaxBatchChars:    cfg.MaxBatchChars,
+		MemoryInputLimit: cfg.MaxMemoryInput,
+		MemoryInputChars: cfg.MaxMemoryInputChars,
+		BaseRetryBackoff: time.Duration(cfg.BaseRetryBackoffSeconds) * time.Second,
+		MaxRetryBackoff:  time.Duration(cfg.MaxRetryBackoffSeconds) * time.Second,
+		ShutdownGrace:    time.Duration(cfg.ShutdownGraceSeconds) * time.Second,
+		ExtractorModel:   cfg.ExtractorModel,
+		ExtractorVersion: cfg.ExtractorVersion,
+	}
 }

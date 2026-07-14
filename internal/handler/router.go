@@ -11,6 +11,11 @@ import (
 	"healthAgent/internal/service"
 )
 
+// memoryNotifier 抽象“turn 完成后向异步抽取管道投递 session_id”，便于测试注入空实现或省略。
+type memoryNotifier interface {
+	Notify(sessionID string)
+}
+
 // Server 持有 HTTP 层依赖，并挂载路由。
 type Server struct {
 	chat           *service.ChatService
@@ -18,13 +23,14 @@ type Server struct {
 	sessions       *service.SessionService
 	messages       *service.MessageService
 	turnLeases     *service.TurnLeaseService
+	memory         memoryNotifier
 	identityConfig config.IdentityConfig
 	log            *slog.Logger
 	engine         *gin.Engine
 }
 
-// NewServer 构建 HTTP Server 并注册路由与中间件。
-func NewServer(chat *service.ChatService, identity *service.IdentityService, sessions *service.SessionService, messages *service.MessageService, turnLeases *service.TurnLeaseService, identityConfig config.IdentityConfig, log *slog.Logger) *Server {
+// NewServer 构建 HTTP Server 并注册路由与中间件。memory 可为 nil（关闭异步抽取时不投递）。
+func NewServer(chat *service.ChatService, identity *service.IdentityService, sessions *service.SessionService, messages *service.MessageService, turnLeases *service.TurnLeaseService, memory memoryNotifier, identityConfig config.IdentityConfig, log *slog.Logger) *Server {
 	gin.SetMode(gin.ReleaseMode)
 	s := &Server{
 		chat:           chat,
@@ -32,6 +38,7 @@ func NewServer(chat *service.ChatService, identity *service.IdentityService, ses
 		sessions:       sessions,
 		messages:       messages,
 		turnLeases:     turnLeases,
+		memory:         memory,
 		identityConfig: identityConfig,
 		log:            log,
 		engine:         gin.New(), // 不用 gin.Default()，用我们自己的中间件（日志/recover）

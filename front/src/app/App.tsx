@@ -45,6 +45,11 @@ interface Message {
   content: any;
   // time 为气泡下方展示的时间(HH:MM)。历史消息用后端 created_at；实时消息渲染时按需生成。
   time?: string;
+  // failed 标记该助手气泡对应的发送失败，需展示重试入口。
+  failed?: boolean;
+  // retry 保存失败发送的原始负载：重试时复用同一 client_message_id 命中后端幂等，
+  // 避免重复计费/重复落库；只有全新发送才生成新的 UUID。
+  retry?: { clientMessageID: string; text: string };
 }
 
 interface ActionItem {
@@ -339,6 +344,69 @@ function HealthWorkspace() {
     }
   };
 
+  // streamAssistantReply 向后端发起一次流式对话，并把增量原地写入 targetId 对应的气泡。
+  // clientMessageID 由调用方决定：首次发送用新 UUID，重试时复用原 UUID 命中后端幂等。
+  const streamAssistantReply = async (
+    sessionID: string,
+    text: string,
+    clientMessageID: string,
+    targetId: string
+  ) => {
+    const controller = new AbortController();
+    abortRef.current = controller;
+    let acc = "";
+    setIsSending(true);
+    try {
+      await sendChatStream(
+        sessionID,
+        clientMessageID,
+        text,
+        (delta) => {
+          acc += delta;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === targetId
+                ? { ...m, content: acc, failed: false, retry: undefined }
+                : m
+            )
+          );
+        },
+        controller.signal
+      );
+      // 回复完成后刷新会话列表，更新消息数与最近活跃时间。
+      void refreshSessions();
+    } catch {
+      if (controller.signal.aborted) {
+        // 用户主动停止：保留已生成内容；若还没吐出内容则给出停止提示。
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === targetId
+              ? { ...m, content: acc || "（已停止回答）" }
+              : m
+          )
+        );
+        void refreshSessions();
+      } else {
+        // 网络/后端失败：标记 failed 并保存原始负载，供用户复用同一 client_message_id 重试。
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === targetId
+              ? {
+                  ...m,
+                  content: "抱歉，暂时没能连上健康管家，请稍后再试。",
+                  failed: true,
+                  retry: { clientMessageID, text },
+                }
+              : m
+          )
+        );
+      }
+    } finally {
+      abortRef.current = null;
+      setIsSending(false);
+    }
+  };
+
   const handleSendMessage = async (text: string) => {
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -369,55 +437,31 @@ function HealthWorkspace() {
       { id: typingId, type: "ai", content: "" },
     ]);
 
-    const controller = new AbortController();
-    abortRef.current = controller;
-    let acc = "";
-    setIsSending(true);
-    try {
-      const sessionID = activeSessionID ?? (await ensureSessionID());
-      if (!activeSessionID) {
-        setActiveSessionID(sessionID);
-        rememberSessionID(sessionID);
-      }
-      const clientMessageID = crypto.randomUUID();
-      await sendChatStream(
-        sessionID,
-        clientMessageID,
-        text,
-        (delta) => {
-          acc += delta;
-          setMessages((prev) =>
-            prev.map((m) => (m.id === typingId ? { ...m, content: acc } : m))
-          );
-        },
-        controller.signal
-      );
-      // 回复完成后刷新会话列表，更新消息数与最近活跃时间。
-      void refreshSessions();
-    } catch {
-      if (controller.signal.aborted) {
-        // 用户主动停止：保留已生成内容；若还没吐出内容则给出停止提示。
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === typingId
-              ? { ...m, content: acc || "（已停止回答）" }
-              : m
-          )
-        );
-        void refreshSessions();
-      } else {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === typingId
-              ? { ...m, content: "抱歉，暂时没能连上健康管家，请稍后再试。" }
-              : m
-          )
-        );
-      }
-    } finally {
-      abortRef.current = null;
-      setIsSending(false);
+    const sessionID = activeSessionID ?? (await ensureSessionID());
+    if (!activeSessionID) {
+      setActiveSessionID(sessionID);
+      rememberSessionID(sessionID);
     }
+    // 全新发送生成新的 client_message_id。
+    await streamAssistantReply(sessionID, text, crypto.randomUUID(), typingId);
+  };
+
+  // handleRetryMessage 重试失败的助手回复：复用原 client_message_id，让后端幂等去重
+  // （已完成则回放、进行中则拒绝、失败/过期才真正重跑），不会重复扣费或重复落库。
+  const handleRetryMessage = async (messageId: string) => {
+    if (isSending) return;
+    const target = messages.find((m) => m.id === messageId);
+    if (!target?.retry) return;
+    const { clientMessageID, text } = target.retry;
+    const sessionID = activeSessionID ?? (await ensureSessionID());
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageId
+          ? { ...m, content: "", failed: false, retry: undefined }
+          : m
+      )
+    );
+    await streamAssistantReply(sessionID, text, clientMessageID, messageId);
   };
 
   const handleAcceptMeal = () => {
@@ -566,6 +610,12 @@ function HealthWorkspace() {
                       key={message.id}
                       message={message.content}
                       time={resolveTime(message)}
+                      failed={message.failed}
+                      onRetry={
+                        message.failed
+                          ? () => handleRetryMessage(message.id)
+                          : undefined
+                      }
                     />
                   );
                 case "meal-card":

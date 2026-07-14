@@ -232,6 +232,11 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 			return false
 		}
 		turnCompleted = true
+		// turn 已成功提交（user+assistant 落库、lease=completed）。向异步记忆抽取管道非阻塞投递，
+		// 队列满时管道内部丢弃并记指标，补扫兜底；这里绝不因记忆抽取阻塞或影响聊天回复。
+		if s.memory != nil {
+			s.memory.Notify(req.SessionID)
+		}
 		if err := writeSSE("done", "{}"); err != nil {
 			s.log.Warn("turn 已完成但 done 事件发送失败",
 				"trace_id", TraceIDFromContext(c.Request.Context()),
@@ -243,7 +248,7 @@ func (s *Server) chatStreamHandler(c *gin.Context) {
 		return true
 	}
 
-	assistantContent, err := s.chat.Stream(ctx, history, sendDelta)
+	assistantContent, err := s.chat.Stream(ctx, userID, history, sendDelta)
 	if err != nil {
 		// 未配置 Key：不算服务故障，当作一段普通回复流出去，方便本地先跑通链路。
 		// 兜底回复也要走跟正常回复一样的落库规则，否则刷新后历史里会缺这一轮 assistant 回复。

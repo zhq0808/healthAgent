@@ -1,17 +1,22 @@
 import { motion } from "motion/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { RotateCcw } from "lucide-react";
 
 interface AIMessageProps {
   message: string;
   time?: string;
+  // failed 为 true 时该气泡对应一次失败发送，展示重试入口。
+  failed?: boolean;
+  // onRetry 复用原 client_message_id 重新发送；仅失败气泡提供。
+  onRetry?: () => void;
 }
 
 // AIMessage 渲染助手回复。回复内容可能包含 markdown（加粗、有序/无序列表、链接等），
 // 用 react-markdown + remark-gfm 渲染，并通过 arbitrary variant 给嵌套元素补样式，
 // 避免额外引入 typography 插件。
 // 当内容为空（回复尚未吐字）时，显示三个主题绿色的跳动圆点作为“正在输入”指示。
-export function AIMessage({ message, time }: AIMessageProps) {
+export function AIMessage({ message, time, failed, onRetry }: AIMessageProps) {
   const isTyping = message.trim().length === 0;
 
   return (
@@ -45,6 +50,16 @@ export function AIMessage({ message, time }: AIMessageProps) {
       </div>
       {!isTyping && time && (
         <span className="mt-1 pl-1 text-[11px] text-muted-foreground">{time}</span>
+      )}
+      {failed && onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-1.5 flex items-center gap-1 rounded-lg px-1 text-[12px] text-primary hover:underline"
+        >
+          <RotateCcw size={12} />
+          重试
+        </button>
       )}
     </motion.div>
   );

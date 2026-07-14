@@ -16,7 +16,35 @@ type Config struct {
 	OpenAI   OpenAIConfig   `yaml:"openai"   env-prefix:"OPENAI_"`
 	Postgres PostgresConfig `yaml:"postgres" env-prefix:"POSTGRES_"`
 	Redis    RedisConfig    `yaml:"redis"    env-prefix:"REDIS_"`
+	Memory   MemoryConfig   `yaml:"memory"   env-prefix:"MEMORY_"`
 	Log      LogConfig      `yaml:"log"      env-prefix:"LOG_"`
+}
+
+// MemoryConfig 控制异步记忆抽取管道（Worker Pool + 补扫 + 租约 + 退避）的行为与硬上限。
+// 首版单实例：worker/queue 有界，禁止每个 turn 无界起 goroutine；批次/字符/操作/退避均有上限。
+// Prompt 可独立迭代；Enabled 控制后台 Worker 是否启动。
+type MemoryConfig struct {
+	Enabled                 bool    `yaml:"enabled"                 env:"ENABLED"                 env-default:"true"`
+	WorkerCount             int     `yaml:"worker_count"            env:"WORKER_COUNT"            env-default:"2"`
+	QueueSize               int     `yaml:"queue_size"              env:"QUEUE_SIZE"              env-default:"256"`
+	ScanIntervalSeconds     int     `yaml:"scan_interval_seconds"   env:"SCAN_INTERVAL_SECONDS"   env-default:"60"`
+	LeaseDurationSeconds    int     `yaml:"lease_duration_seconds"  env:"LEASE_DURATION_SECONDS"  env-default:"90"`
+	ExtractTimeoutSeconds   int     `yaml:"extract_timeout_seconds" env:"EXTRACT_TIMEOUT_SECONDS" env-default:"30"`
+	TaskTimeoutSeconds      int     `yaml:"task_timeout_seconds"    env:"TASK_TIMEOUT_SECONDS"    env-default:"60"`
+	ScanBatchSize           int     `yaml:"scan_batch_size"         env:"SCAN_BATCH_SIZE"         env-default:"50"`
+	MaxBatchMessages        int     `yaml:"max_batch_messages"      env:"MAX_BATCH_MESSAGES"      env-default:"20"`
+	MaxBatchChars           int     `yaml:"max_batch_chars"         env:"MAX_BATCH_CHARS"         env-default:"8000"`
+	MaxMemoryInput          int     `yaml:"max_memory_input"        env:"MAX_MEMORY_INPUT"        env-default:"50"`
+	MaxMemoryInputChars     int     `yaml:"max_memory_input_chars"  env:"MAX_MEMORY_INPUT_CHARS"  env-default:"4000"`
+	MaxOperations           int     `yaml:"max_operations"          env:"MAX_OPERATIONS"          env-default:"20"`
+	MaxMemoryValueChars     int     `yaml:"max_memory_value_chars"  env:"MAX_MEMORY_VALUE_CHARS"  env-default:"500"`
+	MinConfidence           float64 `yaml:"min_confidence"          env:"MIN_CONFIDENCE"          env-default:"0.6"`
+	BaseRetryBackoffSeconds int     `yaml:"base_retry_backoff_secs" env:"BASE_RETRY_BACKOFF_SECS" env-default:"5"`
+	MaxRetryBackoffSeconds  int     `yaml:"max_retry_backoff_secs"  env:"MAX_RETRY_BACKOFF_SECS"  env-default:"600"`
+	ShutdownGraceSeconds    int     `yaml:"shutdown_grace_seconds"  env:"SHUTDOWN_GRACE_SECONDS"  env-default:"10"`
+	ExtractorModel          string  `yaml:"extractor_model"         env:"EXTRACTOR_MODEL"`
+	ExtractorVersion        string  `yaml:"extractor_version"       env:"EXTRACTOR_VERSION"       env-default:"memory-extractor-v1"`
+	ExtractorPromptPath     string  `yaml:"extractor_prompt_path"   env:"EXTRACTOR_PROMPT_PATH"   env-default:"prompts/memory_extractor_v1.tmpl"`
 }
 
 // HTTPConfig 保持不变
@@ -35,7 +63,7 @@ type IdentityConfig struct {
 type LLMConfig struct {
 	APIKey         string  `yaml:"-"        env:"API_KEY"`
 	BaseURL        string  `yaml:"base_url" env:"BASE_URL" env-default:"https://api.deepseek.com"`
-	Model          string  `yaml:"model"    env:"MODEL"    env-default:"deepseek-chat"`
+	Model          string  `yaml:"model"    env:"MODEL"    env-default:"deepseek/deepseek-v4-flash"`
 	Temperature    float64 `yaml:"temperature" env:"TEMPERATURE" env-default:"0"`
 	TimeoutSeconds int     `yaml:"timeout"  env:"TIMEOUT"  env-default:"30"`
 }
@@ -104,6 +132,13 @@ func Load(path string) (*Config, error) {
 	if err := cleanenv.ReadConfig(path, &cfg); err != nil {
 		return nil, fmt.Errorf("配置加载失败: %w", err)
 	}
+	cfg.resolveDerivedDefaults()
 
 	return &cfg, nil
+}
+
+func (c *Config) resolveDerivedDefaults() {
+	if c.Memory.ExtractorModel == "" {
+		c.Memory.ExtractorModel = c.DeepSeek.Model
+	}
 }

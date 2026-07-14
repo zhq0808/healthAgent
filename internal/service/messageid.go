@@ -17,9 +17,14 @@ import (
 // 数据库对 message_id 仍保留 UNIQUE 约束作为最终兜底；调用方在命中唯一冲突时
 // 应重新生成并有限重试（见 store 层的保存点重试）。
 func NewMessageID() (string, error) {
+	return newUUIDv7("message_id")
+}
+
+// newUUIDv7 生成一个 RFC 9562 UUIDv7 字符串，供各类后端业务 ID 复用。label 只用于错误信息定位。
+func newUUIDv7(label string) (string, error) {
 	id, err := uuid.NewV7()
 	if err != nil {
-		return "", fmt.Errorf("生成 UUIDv7 message_id 失败: %w", err)
+		return "", fmt.Errorf("生成 UUIDv7 %s 失败: %w", label, err)
 	}
 	return id.String(), nil
 }

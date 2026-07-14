@@ -17,7 +17,7 @@ chat:
 
 deepseek:
   base_url: "https://api.deepseek.com"
-  model: "deepseek-chat"
+  model: "deepseek/deepseek-v4-flash"
   temperature: 0
   timeout: 30
 

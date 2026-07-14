@@ -555,7 +555,7 @@ func newChatHandlerTestServerWithLease(messageRepository service.MessageReposito
 		panic(err)
 	}
 	return &Server{
-		chat:       service.NewChatService(chatModel, prompt, service.DefaultMaxReplyChars),
+		chat:       service.NewChatService(chatModel, prompt, nil, service.MemoryBudget{}, service.DefaultMaxReplyChars),
 		sessions:   service.NewSessionService(sessionRepository),
 		messages:   service.NewMessageService(messageRepository),
 		turnLeases: service.NewTurnLeaseService(turnLeaseRepository),

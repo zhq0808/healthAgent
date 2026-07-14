@@ -16,6 +16,19 @@ type fakeChatModel struct {
 	messages []llm.Message
 }
 
+type fakeChatMemoryReader struct {
+	userID   string
+	budget   MemoryBudget
+	memories []Memory
+	err      error
+}
+
+func (r *fakeChatMemoryReader) ListCurrentMemories(_ context.Context, userID string, budget MemoryBudget) ([]Memory, error) {
+	r.userID = userID
+	r.budget = budget
+	return r.memories, r.err
+}
+
 func testChatPrompt(t *testing.T) *ChatPrompt {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "chat.tmpl")
@@ -46,7 +59,7 @@ func (f *fakeChatModel) Stream(_ context.Context, messages []llm.Message, onDelt
 
 func TestChatServiceStreamBuildsMessages(t *testing.T) {
 	model := &fakeChatModel{}
-	chatService := NewChatService(model, testChatPrompt(t), DefaultMaxReplyChars)
+	chatService := NewChatService(model, testChatPrompt(t), nil, MemoryBudget{}, DefaultMaxReplyChars)
 	var reply string
 	history := []ConversationMessage{
 		{Seq: 1, Role: "user", Content: "my name is Alice"},
@@ -54,7 +67,7 @@ func TestChatServiceStreamBuildsMessages(t *testing.T) {
 		{Seq: 3, Role: "user", Content: "what is my name?"},
 	}
 
-	content, err := chatService.Stream(context.Background(), history, func(delta string) error {
+	content, err := chatService.Stream(context.Background(), "usr-alice", history, func(delta string) error {
 		reply += delta
 		return nil
 	})
@@ -89,6 +102,28 @@ func TestChatServiceStreamBuildsMessages(t *testing.T) {
 	}
 }
 
+func TestChatServiceStreamInjectsCurrentUserMemoriesAcrossSessions(t *testing.T) {
+	model := &fakeChatModel{}
+	memoryReader := &fakeChatMemoryReader{memories: []Memory{
+		{MemoryType: "preference", MemoryValue: "用户不爱吃辣"},
+	}}
+	budget := MemoryBudget{MaxCount: 20, MaxChars: 2000}
+	chatService := NewChatService(model, testChatPrompt(t), memoryReader, budget, DefaultMaxReplyChars)
+
+	_, err := chatService.Stream(context.Background(), "usr-owner", []ConversationMessage{
+		{Seq: 1, Role: "user", Content: "我喜欢吃辣吗？"},
+	}, func(string) error { return nil })
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	if memoryReader.userID != "usr-owner" || memoryReader.budget.MaxCount != budget.MaxCount {
+		t.Fatalf("memory lookup user=%q budget=%+v, want usr-owner and MaxCount=%d", memoryReader.userID, memoryReader.budget, budget.MaxCount)
+	}
+	if len(model.messages) == 0 || !strings.Contains(model.messages[0].Content, "- [preference] 用户不爱吃辣") {
+		t.Fatalf("system prompt did not include recalled preference: %+v", model.messages)
+	}
+}
+
 // sequencedChatModel 模拟底层模型逐段回调 onDelta ，只要 onDelta 返回 error 就立即停止读取并把该 error 传回去，
 // 这与 llm.DeepSeekClient.Stream 的真实行为保持一致。
 type sequencedChatModel struct {
@@ -110,10 +145,10 @@ func (m *sequencedChatModel) Stream(_ context.Context, _ []llm.Message, onDelta 
 
 func TestChatServiceStreamTruncatesLongReplyWithoutTreatingItAsFailure(t *testing.T) {
 	model := &sequencedChatModel{deltas: []string{"12345", "67890", "abcde"}}
-	chatService := NewChatService(model, testChatPrompt(t), 5) // 上限 5 个字符，第一段刚好用完
+	chatService := NewChatService(model, testChatPrompt(t), nil, MemoryBudget{}, 5) // 上限 5 个字符，第一段刚好用完
 
 	var forwarded []string
-	content, err := chatService.Stream(context.Background(), nil, func(delta string) error {
+	content, err := chatService.Stream(context.Background(), "usr-test", nil, func(delta string) error {
 		forwarded = append(forwarded, delta)
 		return nil
 	})
@@ -133,10 +168,10 @@ func TestChatServiceStreamTruncatesLongReplyWithoutTreatingItAsFailure(t *testin
 
 func TestChatServiceStreamCountsUnicodeCharactersAndTrimsOversizedDelta(t *testing.T) {
 	model := &sequencedChatModel{deltas: []string{"你好世界"}}
-	chatService := NewChatService(model, testChatPrompt(t), 2)
+	chatService := NewChatService(model, testChatPrompt(t), nil, MemoryBudget{}, 2)
 
 	var forwarded []string
-	content, err := chatService.Stream(context.Background(), nil, func(delta string) error {
+	content, err := chatService.Stream(context.Background(), "usr-test", nil, func(delta string) error {
 		forwarded = append(forwarded, delta)
 		return nil
 	})
@@ -154,9 +189,9 @@ func TestChatServiceStreamCountsUnicodeCharactersAndTrimsOversizedDelta(t *testi
 func TestChatServiceStreamPropagatesRealModelErrorWithPartialContent(t *testing.T) {
 	wantErr := errors.New("upstream failed")
 	model := &sequencedChatModel{deltas: []string{"partial"}, streamErr: wantErr}
-	chatService := NewChatService(model, testChatPrompt(t), DefaultMaxReplyChars)
+	chatService := NewChatService(model, testChatPrompt(t), nil, MemoryBudget{}, DefaultMaxReplyChars)
 
-	content, err := chatService.Stream(context.Background(), nil, func(string) error { return nil })
+	content, err := chatService.Stream(context.Background(), "usr-test", nil, func(string) error { return nil })
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("Stream() error = %v, want %v", err, wantErr)
 	}
@@ -167,9 +202,9 @@ func TestChatServiceStreamPropagatesRealModelErrorWithPartialContent(t *testing.
 
 func TestNewChatServiceAppliesDefaultMaxReplyCharsWhenNotPositive(t *testing.T) {
 	model := &sequencedChatModel{deltas: []string{strings.Repeat("a", DefaultMaxReplyChars)}}
-	chatService := NewChatService(model, testChatPrompt(t), 0)
+	chatService := NewChatService(model, testChatPrompt(t), nil, MemoryBudget{}, 0)
 
-	content, err := chatService.Stream(context.Background(), nil, func(string) error { return nil })
+	content, err := chatService.Stream(context.Background(), "usr-test", nil, func(string) error { return nil })
 	if err != nil {
 		t.Fatalf("Stream() error = %v", err)
 	}
