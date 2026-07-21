@@ -244,7 +244,12 @@ function CalendarHeatmap({
   );
 }
 
-export function Dashboard({ onClose }: { onClose: () => void }) {
+interface DashboardProps {
+  onClose?: () => void;
+  mode?: "drawer" | "page";
+}
+
+export function Dashboard({ onClose, mode = "drawer" }: DashboardProps) {
   const [todos, setTodos] = useState(INITIAL_TODOS);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingTodoID, setEditingTodoID] = useState<string | null>(null);
@@ -325,11 +330,19 @@ export function Dashboard({ onClose }: { onClose: () => void }) {
   return (
     <motion.aside
       key="learning-dashboard"
-      initial={{ x: "100%" }}
-      animate={{ x: 0 }}
-      exit={{ x: "100%" }}
-      transition={{ type: "spring", stiffness: 320, damping: 34 }}
-      className="absolute inset-y-0 right-0 z-50 flex w-[92%] max-w-[430px] flex-col overflow-hidden rounded-l-[28px] border-l border-white/80 bg-background shadow-[-18px_0_48px_rgba(24,45,32,0.18)]"
+      initial={mode === "drawer" ? { x: "100%" } : { opacity: 0, y: 8 }}
+      animate={mode === "drawer" ? { x: 0 } : { opacity: 1, y: 0 }}
+      exit={mode === "drawer" ? { x: "100%" } : { opacity: 0 }}
+      transition={
+        mode === "drawer"
+          ? { type: "spring", stiffness: 320, damping: 34 }
+          : { duration: 0.2, ease: "easeOut" }
+      }
+      className={
+        mode === "drawer"
+          ? "absolute inset-y-0 right-0 z-50 flex w-[92%] max-w-[430px] flex-col overflow-hidden rounded-l-[28px] border-l border-white/80 bg-background shadow-[-18px_0_48px_rgba(24,45,32,0.18)]"
+          : "relative flex min-h-0 flex-1 flex-col overflow-hidden bg-background pb-16"
+      }
     >
       <div className="flex flex-shrink-0 items-center justify-between px-5 pb-4 pt-8">
         <div>
@@ -340,19 +353,21 @@ export function Dashboard({ onClose }: { onClose: () => void }) {
           <span className="rounded-full bg-secondary px-2.5 py-1 text-[10px] text-muted-foreground">
             演示数据
           </span>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="关闭学习看板"
-            className="flex size-8 items-center justify-center rounded-full bg-secondary transition-colors hover:bg-accent"
-          >
-            <X size={15} className="text-muted-foreground" />
-          </button>
+          {mode === "drawer" && onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="关闭学习看板"
+              className="flex size-8 items-center justify-center rounded-full bg-secondary transition-colors hover:bg-accent"
+            >
+              <X size={15} className="text-muted-foreground" />
+            </button>
+          )}
         </div>
       </div>
 
       <div
-        className="flex-1 overflow-y-auto px-6 pb-8"
+        className={`flex-1 overflow-y-auto px-6 ${mode === "page" ? "pb-24" : "pb-8"}`}
         style={{ scrollbarWidth: "none" }}
       >
         <CalendarHeatmap todos={todos} />

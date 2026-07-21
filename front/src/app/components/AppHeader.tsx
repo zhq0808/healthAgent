@@ -1,14 +1,13 @@
-import { BrainCircuit, ChartNoAxesCombined, PanelLeft } from "lucide-react";
+import { BrainCircuit, PanelLeft } from "lucide-react";
 
 interface AppHeaderProps {
   onOpenSessions: () => void;
-  onOpenDashboard: () => void;
 }
 
-// AppHeader 顶部栏：左侧依次为会话入口和品牌，右侧为学习看板入口。
-export function AppHeader({ onOpenSessions, onOpenDashboard }: AppHeaderProps) {
+// AppHeader 顶部栏：会话入口与品牌。
+export function AppHeader({ onOpenSessions }: AppHeaderProps) {
   return (
-    <header className="flex items-center justify-between px-5 pt-6 pb-3 bg-background/90 backdrop-blur-sm border-b border-border flex-shrink-0">
+    <header className="flex items-center px-5 pt-6 pb-3 bg-background/90 backdrop-blur-sm border-b border-border flex-shrink-0">
       <div className="flex items-center gap-2.5">
         <button
           type="button"
@@ -31,15 +30,6 @@ export function AppHeader({ onOpenSessions, onOpenDashboard }: AppHeaderProps) {
           </p>
         </div>
       </div>
-      <button
-        type="button"
-        onClick={onOpenDashboard}
-        aria-label="学习看板"
-        title="学习看板"
-        className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center hover:bg-accent transition-colors active:scale-95"
-      >
-        <ChartNoAxesCombined size={16} className="text-primary" />
-      </button>
     </header>
   );
 }

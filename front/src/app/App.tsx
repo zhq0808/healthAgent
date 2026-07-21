@@ -14,6 +14,8 @@ import { MealCard } from "./components/MealCard";
 import { AppHeader } from "./components/AppHeader";
 import { SessionDrawer } from "./components/SessionDrawer";
 import { Dashboard } from "./components/Dashboard";
+import { BottomNavigation, type AppView } from "./components/BottomNavigation";
+import { KnowledgeBasePage } from "./components/KnowledgeBasePage";
 import {
   createOrResumeGuest,
   ensureSessionID,
@@ -145,7 +147,7 @@ function InterviewWorkspace() {
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
-  const [dashboardOpen, setDashboardOpen] = useState(false);
+  const [activeView, setActiveView] = useState<AppView>("practice");
   const [isSending, setIsSending] = useState(false);
   const [selectedModelID, setSelectedModelID] = useState<string>(() =>
     getSelectedModelID()
@@ -557,16 +559,17 @@ function InterviewWorkspace() {
 
   return (
     <div className="size-full flex flex-col overflow-hidden bg-background relative">
-      <AppHeader
-        onOpenSessions={() => setSessionDrawerOpen(true)}
-        onOpenDashboard={() => setDashboardOpen(true)}
-      />
+      {activeView === "practice" ? (
+        <>
+          <AppHeader
+            onOpenSessions={() => setSessionDrawerOpen(true)}
+          />
 
-      <StatusTags tags={tags} />
+          <StatusTags tags={tags} />
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        {!conversationStarted ? (
-          <div className="min-h-full flex flex-col items-center justify-center px-6 pb-36 text-center">
+          <div ref={scrollRef} className="flex-1 overflow-y-auto">
+            {!conversationStarted ? (
+              <div className="min-h-full flex flex-col items-center justify-center px-6 pb-48 text-center">
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -583,9 +586,9 @@ function InterviewWorkspace() {
                 用一次主动输出，检验你是否真的能讲清楚。
               </p>
             </motion.div>
-          </div>
-        ) : (
-        <div className="flex flex-col pt-2 pb-36">
+              </div>
+            ) : (
+        <div className="flex flex-col pt-2 pb-48">
           <AnimatePresence>
             {messages.map((message) => {
               switch (message.type) {
@@ -673,53 +676,51 @@ function InterviewWorkspace() {
             )}
           </AnimatePresence>
         </div>
-        )}
-      </div>
+            )}
+          </div>
 
-      <InputDock
-        onSendMessage={handleSendMessage}
-        onVoiceInput={() => {}}
-        onPhoto={handlePhoto}
-        isResponding={isSending}
-        onStop={handleStop}
-        models={MODELS}
-        selectedModelID={selectedModelID}
-        onSelectModel={(id) => {
-          setSelectedModelID(id);
-          rememberModelID(id);
+          <InputDock
+            onSendMessage={handleSendMessage}
+            onVoiceInput={() => {}}
+            onPhoto={handlePhoto}
+            isResponding={isSending}
+            onStop={handleStop}
+            models={MODELS}
+            selectedModelID={selectedModelID}
+            onSelectModel={(id) => {
+              setSelectedModelID(id);
+              rememberModelID(id);
+            }}
+          />
+
+          <SessionDrawer
+            open={sessionDrawerOpen}
+            sessions={sessions}
+            activeSessionID={activeSessionID}
+            loading={sessionsLoading}
+            error={sessionsError}
+            busy={isSending}
+            onClose={() => setSessionDrawerOpen(false)}
+            onSelect={handleSelectSession}
+            onCreate={handleCreateSession}
+            onRetry={refreshSessions}
+            onRename={handleRenameSession}
+            onDelete={handleDeleteSession}
+          />
+        </>
+      ) : activeView === "plan" ? (
+        <Dashboard mode="page" />
+      ) : (
+        <KnowledgeBasePage />
+      )}
+
+      <BottomNavigation
+        activeView={activeView}
+        onChange={(view) => {
+          setSessionDrawerOpen(false);
+          setActiveView(view);
         }}
       />
-
-      <SessionDrawer
-        open={sessionDrawerOpen}
-        sessions={sessions}
-        activeSessionID={activeSessionID}
-        loading={sessionsLoading}
-        error={sessionsError}
-        busy={isSending}
-        onClose={() => setSessionDrawerOpen(false)}
-        onSelect={handleSelectSession}
-        onCreate={handleCreateSession}
-        onRetry={refreshSessions}
-        onRename={handleRenameSession}
-        onDelete={handleDeleteSession}
-      />
-
-      <AnimatePresence>
-        {dashboardOpen && (
-          <>
-            <motion.div
-              key="dashboard-backdrop"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/20 z-40"
-              onClick={() => setDashboardOpen(false)}
-            />
-            <Dashboard onClose={() => setDashboardOpen(false)} />
-          </>
-        )}
-      </AnimatePresence>
     </div>
   );
 }
