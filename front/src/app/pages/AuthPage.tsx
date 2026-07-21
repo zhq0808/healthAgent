@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Eye, EyeOff, Leaf, Lock, User } from "lucide-react";
+import { BrainCircuit, Eye, EyeOff, Lock, User } from "lucide-react";
 
 export interface LoginInput {
   username: string;
@@ -109,13 +109,13 @@ export function AuthPage({
         <div className="absolute bottom-0 left-1/2 size-64 -translate-x-1/2 translate-y-32 rounded-full bg-white/5" />
 
         <div className="relative mb-5 flex size-16 items-center justify-center rounded-2xl border border-white/20 bg-white/15 backdrop-blur-sm">
-          <Leaf aria-hidden="true" size={28} className="text-white" />
+          <BrainCircuit aria-hidden="true" size={30} className="text-white" />
         </div>
         <h1 className="font-display text-center text-3xl leading-tight text-white">
-          健康管理助手
+          知镜
         </h1>
         <p className="mt-2 text-center text-sm text-white/70">
-          AI 驱动的个人健康管理平台
+          让每一次输出，都成为掌握的证据
         </p>
       </section>
 

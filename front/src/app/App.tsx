@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Leaf } from "lucide-react";
+import { BrainCircuit } from "lucide-react";
 import { StatusTags, StatusTagDef } from "./components/StatusTags";
 import { MealSuggestionCard } from "./components/MealSuggestionCard";
 import { ActionCard } from "./components/ActionCard";
@@ -66,9 +66,9 @@ const initialActions: ActionItem[] = [
 
 const INITIAL_TAGS: StatusTagDef[] = [
   {
-    id: "energy",
-    emoji: "✨",
-    label: "满血复活",
+    id: "output-streak",
+    emoji: "🔥",
+    label: "连续输出 3 天",
     color: "bg-[#FFF5E6] text-[#A67C52]",
     state: "active",
     sparklineData: [
@@ -80,13 +80,13 @@ const INITIAL_TAGS: StatusTagDef[] = [
       { v: 8 },
       { v: 8 },
     ],
-    summary: "精力状态回升，最近保持得不错，继续加油！",
+    summary: "连续 3 天完成主动输出，本周已产生 5 条练习证据。",
   },
   {
-    id: "period",
-    emoji: "🩸",
-    label: "姨妈期",
-    color: "bg-[#FBEAEC] text-[#B5687A]",
+    id: "review",
+    emoji: "📌",
+    label: "2 项待回顾",
+    color: "bg-[#E9EEF8] text-[#526A91]",
     state: "active",
     expandable: false,
     sparklineData: [
@@ -98,14 +98,14 @@ const INITIAL_TAGS: StatusTagDef[] = [
       { v: 3 },
       { v: 3 },
     ],
-    summary: "经期第 2 天，注意保暖、多喝温水，适度休息。",
+    summary: "Kafka 消息积压与 Go GC 将在今天进入间隔复习。",
   },
 ];
 
 const WELCOME_MESSAGE: Message = {
   id: "welcome",
   type: "ai",
-  content: "你好，我是你的健康管家 🌿 有什么可以帮你的吗？",
+  content: "准备好开始今天的面试训练了吗？",
 };
 
 // formatClock 把时间格式化成 HH:MM（与旧版一致：zh-CN 24 小时制），用于气泡下方的时间戳。
@@ -134,7 +134,7 @@ function HealthWorkspace() {
     {
       id: "welcome",
       type: "ai",
-      content: "你好，我是你的健康管家 🌿 有什么可以帮你的吗？",
+      content: "准备好开始今天的面试训练了吗？",
     },
   ]);
 
@@ -393,7 +393,7 @@ function HealthWorkspace() {
             m.id === targetId
               ? {
                   ...m,
-                  content: "抱歉，暂时没能连上健康管家，请稍后再试。",
+                  content: "抱歉，暂时没能连上知镜，请稍后再试。",
                   failed: true,
                   retry: { clientMessageID, text },
                 }
@@ -574,13 +574,13 @@ function HealthWorkspace() {
               className="flex flex-col items-center"
             >
               <div className="w-16 h-16 rounded-3xl bg-primary flex items-center justify-center mb-5 shadow-sm">
-                <Leaf size={30} className="text-white" />
+                <BrainCircuit size={31} className="text-white" />
               </div>
               <h2 className="text-2xl font-semibold text-foreground">
-                你好，我是你的健康管家 🌿
+                今天想练哪一项？
               </h2>
               <p className="mt-2 max-w-xs text-sm leading-relaxed text-muted-foreground">
-                有什么想聊的吗？无论是饮食、运动，还是今天的心情，我都在。
+                用一次主动输出，检验你是否真的能讲清楚。
               </p>
             </motion.div>
           </div>

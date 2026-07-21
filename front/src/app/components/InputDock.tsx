@@ -4,9 +4,10 @@ import { Mic, Send, Plus, Square, Sparkles, ChevronDown, Check } from "lucide-re
 import type { ModelOption } from "../api/chat";
 
 const PROMPTS = [
-  { emoji: "🍱", label: "推荐低GI午餐" },
-  { emoji: "📊", label: "看本周进度" },
-  { emoji: "💧", label: "喝水打卡" },
+  { emoji: "🧠", label: "费曼学习" },
+  { emoji: "🔄", label: "知识点回顾" },
+  { emoji: "💬", label: "模拟面试" },
+  { emoji: "🎯", label: "JD 分析" },
 ];
 
 interface InputDockProps {
@@ -154,7 +155,7 @@ export function InputDock({
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="说说现在的感受..."
+            placeholder="输入想练习的知识点或面试问题..."
             className="w-full bg-white rounded-full px-5 py-3.5 pr-12 shadow-[0_2px_20px_rgba(0,0,0,0.06)] focus:outline-none focus:ring-2 focus:ring-[#A8D5BA]/30 transition-shadow text-sm"
           />
           <AnimatePresence>
