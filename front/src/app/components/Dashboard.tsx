@@ -8,16 +8,49 @@ import {
   ChevronRight,
   Code2,
   Mic2,
+  Pencil,
+  Plus,
   X,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
+import { Input } from "./ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
+
+const TODO_TYPES = [
+  { label: "知识点回顾", icon: BookOpenCheck },
+  { label: "费曼输出", icon: Mic2 },
+  { label: "编码验证", icon: Code2 },
+  { label: "模拟面试", icon: BriefcaseBusiness },
+] as const;
+
+type TodoType = (typeof TODO_TYPES)[number]["label"];
 
 interface TodoItem {
   id: string;
   title: string;
-  type: string;
+  type: TodoType;
   duration: string;
   completed: boolean;
   icon: typeof BookOpenCheck;
+}
+
+interface TodoDraft {
+  title: string;
+  type: TodoType;
+  durationMinutes: string;
 }
 
 interface DayProgress {
@@ -26,6 +59,11 @@ interface DayProgress {
 }
 
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
+const EMPTY_TODO_DRAFT: TodoDraft = {
+  title: "",
+  type: "知识点回顾",
+  durationMinutes: "10",
+};
 
 const INITIAL_TODOS: TodoItem[] = [
   {
@@ -208,6 +246,10 @@ function CalendarHeatmap({
 
 export function Dashboard({ onClose }: { onClose: () => void }) {
   const [todos, setTodos] = useState(INITIAL_TODOS);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editingTodoID, setEditingTodoID] = useState<string | null>(null);
+  const [draft, setDraft] = useState<TodoDraft>(EMPTY_TODO_DRAFT);
+  const [editorError, setEditorError] = useState("");
   const completedCount = todos.filter((todo) => todo.completed).length;
   const completionRate = Math.round((completedCount / todos.length) * 100);
 
@@ -217,6 +259,67 @@ export function Dashboard({ onClose }: { onClose: () => void }) {
         todo.id === id ? { ...todo, completed: !todo.completed } : todo,
       ),
     );
+  };
+
+  const openCreateTodo = () => {
+    setEditingTodoID(null);
+    setDraft(EMPTY_TODO_DRAFT);
+    setEditorError("");
+    setEditorOpen(true);
+  };
+
+  const openEditTodo = (todo: TodoItem) => {
+    setEditingTodoID(todo.id);
+    setDraft({
+      title: todo.title,
+      type: todo.type,
+      durationMinutes: todo.duration.replace(/\D/g, "") || "10",
+    });
+    setEditorError("");
+    setEditorOpen(true);
+  };
+
+  const saveTodo = () => {
+    const title = draft.title.trim();
+    const durationMinutes = Number(draft.durationMinutes);
+    if (!title) {
+      setEditorError("请输入 Todo 内容");
+      return;
+    }
+    if (!Number.isInteger(durationMinutes) || durationMinutes <= 0 || durationMinutes > 480) {
+      setEditorError("预计时长请输入 1 到 480 之间的整数");
+      return;
+    }
+
+    const selectedType = TODO_TYPES.find((item) => item.label === draft.type) ?? TODO_TYPES[0];
+    if (editingTodoID) {
+      setTodos((current) =>
+        current.map((todo) =>
+          todo.id === editingTodoID
+            ? {
+                ...todo,
+                title,
+                type: selectedType.label,
+                duration: `${durationMinutes} 分钟`,
+                icon: selectedType.icon,
+              }
+            : todo,
+        ),
+      );
+    } else {
+      setTodos((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          title,
+          type: selectedType.label,
+          duration: `${durationMinutes} 分钟`,
+          completed: false,
+          icon: selectedType.icon,
+        },
+      ]);
+    }
+    setEditorOpen(false);
   };
 
   return (
@@ -264,11 +367,22 @@ export function Dashboard({ onClose }: { onClose: () => void }) {
                 今日 Todo
               </h3>
             </div>
-            <div className="text-right">
-              <p className="text-[13px] font-semibold text-foreground">
-                {completedCount}/{todos.length} 已完成
-              </p>
-              <p className="text-[10px] text-muted-foreground">完成度 {completionRate}%</p>
+            <div className="flex items-center gap-3">
+              <div className="text-right">
+                <p className="text-[13px] font-semibold text-foreground">
+                  {completedCount}/{todos.length} 已完成
+                </p>
+                <p className="text-[10px] text-muted-foreground">完成度 {completionRate}%</p>
+              </div>
+              <button
+                type="button"
+                onClick={openCreateTodo}
+                aria-label="新增 Todo"
+                title="新增 Todo"
+                className="flex size-8 items-center justify-center rounded-full bg-primary text-white transition-colors hover:bg-primary/90"
+              >
+                <Plus size={16} />
+              </button>
             </div>
           </div>
 
@@ -283,14 +397,15 @@ export function Dashboard({ onClose }: { onClose: () => void }) {
             {todos.map((todo) => {
               const Icon = todo.icon;
               return (
-                <button
+                <div
                   key={todo.id}
-                  type="button"
-                  onClick={() => toggleTodo(todo.id)}
-                  aria-pressed={todo.completed}
                   className="flex w-full items-center gap-3 rounded-lg border border-border bg-card px-3.5 py-3 text-left transition-colors hover:bg-secondary/40"
                 >
-                  <span
+                  <button
+                    type="button"
+                    onClick={() => toggleTodo(todo.id)}
+                    aria-label={`${todo.completed ? "标记未完成" : "标记完成"}：${todo.title}`}
+                    aria-pressed={todo.completed}
                     className={`flex size-6 flex-shrink-0 items-center justify-center rounded-md border transition-colors ${
                       todo.completed
                         ? "border-primary bg-primary text-white"
@@ -298,7 +413,7 @@ export function Dashboard({ onClose }: { onClose: () => void }) {
                     }`}
                   >
                     <Check size={14} strokeWidth={3} />
-                  </span>
+                  </button>
                   <span className="flex size-8 flex-shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">
                     <Icon size={15} />
                   </span>
@@ -314,12 +429,104 @@ export function Dashboard({ onClose }: { onClose: () => void }) {
                       {todo.type} · {todo.duration}
                     </span>
                   </span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => openEditTodo(todo)}
+                    aria-label={`编辑：${todo.title}`}
+                    title="编辑 Todo"
+                    className="flex size-8 flex-shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-primary"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                </div>
               );
             })}
           </div>
         </section>
       </div>
+
+      <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
+        <DialogContent className="z-[70] max-w-[360px] gap-5 rounded-2xl border-border bg-white p-5">
+          <DialogHeader className="text-left">
+            <DialogTitle>{editingTodoID ? "编辑 Todo" : "新增 Todo"}</DialogTitle>
+            <DialogDescription>设置今天要完成的训练任务。</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <label className="block">
+              <span className="mb-1.5 block text-[12px] font-medium text-foreground">Todo 内容</span>
+              <Input
+                value={draft.title}
+                onChange={(event) => {
+                  setDraft((current) => ({ ...current, title: event.target.value }));
+                  setEditorError("");
+                }}
+                placeholder="例如：复述 Kafka 消息积压排查链路"
+                autoFocus
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-1.5 block text-[12px] font-medium text-foreground">训练类型</span>
+              <Select
+                value={draft.type}
+                onValueChange={(value: TodoType) =>
+                  setDraft((current) => ({ ...current, type: value }))
+                }
+              >
+                <SelectTrigger aria-label="训练类型">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="z-[80]">
+                  {TODO_TYPES.map((item) => (
+                    <SelectItem key={item.label} value={item.label}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1.5 block text-[12px] font-medium text-foreground">预计时长（分钟）</span>
+              <Input
+                type="number"
+                min={1}
+                max={480}
+                step={1}
+                value={draft.durationMinutes}
+                onChange={(event) => {
+                  setDraft((current) => ({ ...current, durationMinutes: event.target.value }));
+                  setEditorError("");
+                }}
+              />
+            </label>
+
+            {editorError && (
+              <p role="alert" className="text-[12px] text-destructive">
+                {editorError}
+              </p>
+            )}
+          </div>
+
+          <DialogFooter className="flex-row justify-end">
+            <button
+              type="button"
+              onClick={() => setEditorOpen(false)}
+              className="rounded-lg px-4 py-2 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-secondary"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={saveTodo}
+              className="rounded-lg bg-primary px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-primary/90"
+            >
+              {editingTodoID ? "保存修改" : "添加 Todo"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </motion.aside>
   );
 }
