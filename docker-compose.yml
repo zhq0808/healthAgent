@@ -1,4 +1,4 @@
-# 健康管理 Agent 本地依赖。
+# 面试训练 Agent 本地依赖。
 # 常用命令（在本目录执行）：
 #   docker compose up -d             # 后台启动
 #   docker compose ps                # 查看状态
@@ -9,30 +9,30 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: health-postgres
+    container_name: interview-postgres
     restart: always
     environment:
       POSTGRES_PASSWORD: root
-      POSTGRES_DB: health_db
+      POSTGRES_DB: interview_agent_db
       TZ: Asia/Shanghai
     ports:
       - "5433:5432" # 宿主机 5433，避开默认 5432
     volumes:
-      - health_pg_data:/var/lib/postgresql/data
+      - interview_pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d health_db"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d interview_agent_db"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7-alpine
-    container_name: health-redis
+    container_name: interview-redis
     restart: always
     ports:
       - "6380:6379" # 宿主机 6380，避开其他项目占用的 6379
     volumes:
-      - health_redis_data:/data
+      - interview_redis_data:/data
     command: redis-server --appendonly yes # 开 AOF 持久化，重启不丢缓存（缓存可丢，但省一次冷启动回源）
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -41,5 +41,5 @@ services:
       retries: 5
 
 volumes:
-  health_pg_data:
-  health_redis_data:
+  interview_pg_data:
+  interview_redis_data:

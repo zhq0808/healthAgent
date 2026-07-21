@@ -36,7 +36,7 @@ type MemoryPipelineConfig struct {
 	ExtractorVersion string        // 记录到 history 的抽取版本
 }
 
-// memoryPipelineMetrics 是管道的轻量运行指标（原子计数），不含任何健康原文。
+// memoryPipelineMetrics 是管道的轻量运行指标（原子计数），不含任何用户原文。
 type memoryPipelineMetrics struct {
 	dropped   atomic.Int64 // 队列满/关闭中丢弃的通知数
 	processed atomic.Int64 // 成功应用（含空操作推进游标）的任务数

@@ -25,13 +25,13 @@ type assertions struct {
 }
 
 type regressionCase struct {
-	ID                 string        `json:"id"`
-	Category           string        `json:"category"`
-	History            []llm.Message `json:"history"`
-	Input              string        `json:"input"`
-	UserProfileSummary string        `json:"user_profile_summary"`
-	Expected           string        `json:"expected"`
-	Assertions         assertions    `json:"assertions"`
+	ID              string        `json:"id"`
+	Category        string        `json:"category"`
+	History         []llm.Message `json:"history"`
+	Input           string        `json:"input"`
+	UserFactSummary string        `json:"user_fact_summary"`
+	Expected        string        `json:"expected"`
+	Assertions      assertions    `json:"assertions"`
 }
 
 type caseResult struct {
@@ -70,7 +70,7 @@ func main() {
 func run() error {
 	configPath := flag.String("config", "config.yaml", "application config path")
 	casesPath := flag.String("cases", "prompts/regression/cases.json", "regression cases path")
-	baselinePath := flag.String("baseline", "prompts/health_chat_v1.tmpl", "baseline prompt path")
+	baselinePath := flag.String("baseline", "prompts/interview_chat_v1.tmpl", "baseline prompt path")
 	outputPath := flag.String("out", "docs/0711/prompt-regression-results.json", "JSON report path")
 	temperature := flag.Float64("temperature", 0, "fixed temperature used by both runs")
 	flag.Parse()
@@ -94,11 +94,11 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("读取 baseline prompt 失败: %w", err)
 	}
-	baseline, err := service.ParseChatPrompt(string(baselineRaw), "health-chat-v1", cfg.Chat.SafetyBoundary)
+	baseline, err := service.ParseChatPrompt(string(baselineRaw), "interview-chat-v1", cfg.Chat.TrustBoundary)
 	if err != nil {
 		return err
 	}
-	candidate, err := service.LoadChatPrompt(cfg.Chat.PromptPath, cfg.Chat.PromptVersion, cfg.Chat.SafetyBoundary)
+	candidate, err := service.LoadChatPrompt(cfg.Chat.PromptPath, cfg.Chat.PromptVersion, cfg.Chat.TrustBoundary)
 	if err != nil {
 		return err
 	}
@@ -170,7 +170,7 @@ func loadCases(path string) ([]regressionCase, error) {
 func executePromptRun(ctx context.Context, client *llm.DeepSeekClient, name, templatePath string, prompt *service.ChatPrompt, cases []regressionCase) (promptRun, error) {
 	runResult := promptRun{Name: name, Version: prompt.Version(), TemplatePath: templatePath, Results: make([]caseResult, 0, len(cases))}
 	for _, testCase := range cases {
-		systemMessage, err := prompt.Render(testCase.UserProfileSummary)
+		systemMessage, err := prompt.Render(testCase.UserFactSummary)
 		if err != nil {
 			return promptRun{}, err
 		}

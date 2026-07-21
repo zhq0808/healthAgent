@@ -135,13 +135,13 @@ func insertCompletedTurn(t *testing.T, pool *pgxpool.Pool, sessionID, userID, us
 	defer cancel()
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO agent_memory_episodic (message_id, session_id, user_id, agent_id, seq, role, status, content, client_message_id)
-		VALUES ($1, $2, $3, 'health-agent', $4, 'user', 'completed', $5, $6)`,
+		VALUES ($1, $2, $3, 'interview-agent', $4, 'user', 'completed', $5, $6)`,
 		userMsgID, sessionID, userID, userSeq, "user says "+userMsgID, clientMessageID); err != nil {
 		t.Fatalf("insert user message: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO agent_memory_episodic (message_id, session_id, user_id, agent_id, seq, parent_message_id, role, status, content)
-		VALUES ($1, $2, $3, 'health-agent', $4, $5, 'assistant', 'completed', $6)`,
+		VALUES ($1, $2, $3, 'interview-agent', $4, $5, 'assistant', 'completed', $6)`,
 		assistantMsgID, sessionID, userID, assistantSeq, userMsgID, "assistant says "+assistantMsgID); err != nil {
 		t.Fatalf("insert assistant message: %v", err)
 	}

@@ -23,7 +23,7 @@ func TestAuthMiddlewareWritesTrustedUserToContext(t *testing.T) {
 	}
 
 	engine := gin.New()
-	engine.Use(authMiddleware(identityService, "health_guest_test", slog.New(slog.NewTextHandler(io.Discard, nil))))
+	engine.Use(authMiddleware(identityService, "interview_guest_test", slog.New(slog.NewTextHandler(io.Discard, nil))))
 	engine.GET("/protected", func(c *gin.Context) {
 		userID, ok := UserIDFromContext(c.Request.Context())
 		if !ok {
@@ -34,7 +34,7 @@ func TestAuthMiddlewareWritesTrustedUserToContext(t *testing.T) {
 	})
 
 	request := httptest.NewRequest(http.MethodGet, "/protected", nil)
-	request.AddCookie(&http.Cookie{Name: "health_guest_test", Value: identity.Token})
+	request.AddCookie(&http.Cookie{Name: "interview_guest_test", Value: identity.Token})
 	recorder := httptest.NewRecorder()
 	engine.ServeHTTP(recorder, request)
 
@@ -48,7 +48,7 @@ func TestAuthMiddlewareRejectsMissingAndInvalidCookie(t *testing.T) {
 	repository := &handlerIdentityRepository{byHash: make(map[string]handlerGuestRecord)}
 	identityService := service.NewIdentityService(repository, time.Hour)
 	engine := gin.New()
-	engine.Use(authMiddleware(identityService, "health_guest_test", slog.New(slog.NewTextHandler(io.Discard, nil))))
+	engine.Use(authMiddleware(identityService, "interview_guest_test", slog.New(slog.NewTextHandler(io.Discard, nil))))
 	engine.GET("/protected", func(c *gin.Context) { c.Status(http.StatusOK) })
 
 	for _, testCase := range []struct {
@@ -56,7 +56,7 @@ func TestAuthMiddlewareRejectsMissingAndInvalidCookie(t *testing.T) {
 		cookie *http.Cookie
 	}{
 		{name: "missing"},
-		{name: "invalid", cookie: &http.Cookie{Name: "health_guest_test", Value: "invalid"}},
+		{name: "invalid", cookie: &http.Cookie{Name: "interview_guest_test", Value: "invalid"}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, "/protected", nil)

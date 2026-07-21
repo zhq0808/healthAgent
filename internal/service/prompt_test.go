@@ -6,34 +6,34 @@ import (
 	"testing"
 )
 
-func TestProductChatPromptCoversAINativeRoles(t *testing.T) {
+func TestInterviewChatPromptEnforcesEvidenceBasedTraining(t *testing.T) {
 	prompt, err := LoadChatPrompt(
-		filepath.Join("..", "..", "prompts", "health_chat_v1.tmpl"),
-		"health-chat-v1",
-		"不得诊断或开处方",
+		filepath.Join("..", "..", "prompts", "interview_chat_v1.tmpl"),
+		"interview-chat-v1",
+		"不得夸大用户经历或掌握状态",
 	)
 	if err != nil {
 		t.Fatalf("LoadChatPrompt() error = %v", err)
 	}
 
-	rendered, err := prompt.Render("目标：控制体重；饮食禁忌：花生过敏")
+	rendered, err := prompt.Render("目标岗位：Go 后端；已确认生产经历：Kafka 消费者开发")
 	if err != nil {
 		t.Fatalf("Render() error = %v", err)
 	}
 	for _, required := range []string{
-		"忙碌上班族",
-		"统一入口",
-		"主动管家",
-		"解读者",
-		"记忆体",
-		"今天吃什么",
-		"不得伪造执行结果",
+		"主动回忆",
+		"输入不等于掌握",
+		"费曼学习",
+		"知识点回顾",
+		"模拟面试",
+		"JD 分析",
+		"真实生产实践、个人 Demo、独立练习和概念学习",
+		"AI 结论先作为候选",
 		"尚未保存",
-		"不能替代医生建议",
-		"不得自行缩小或重新解释过敏范围",
-		"400 个汉字以内",
-		"health-chat-v1",
-		"花生过敏",
+		"不得夸大用户经历或掌握状态",
+		"600 个汉字以内",
+		"interview-chat-v1",
+		"Kafka 消费者开发",
 	} {
 		if !strings.Contains(rendered, required) {
 			t.Errorf("rendered prompt missing %q", required)

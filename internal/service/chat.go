@@ -89,11 +89,11 @@ func (s *ChatService) ModelName() string {
 // 达到 maxReplyChars 上限时，附加一段截断提示后正常收尾（返回 nil error），
 // 因为客户端已经看到了前面这部分内容，不应该被当作一次调用失败。
 func (s *ChatService) Stream(ctx context.Context, userID string, history []ConversationMessage, onDelta func(delta string) error) (string, error) {
-	userProfileSummary, err := s.loadUserProfileSummary(ctx, userID)
+	userFactSummary, err := s.loadUserFactSummary(ctx, userID)
 	if err != nil {
 		return "", fmt.Errorf("加载用户记忆失败: %w", err)
 	}
-	systemPrompt, err := s.prompt.Render(userProfileSummary)
+	systemPrompt, err := s.prompt.Render(userFactSummary)
 	if err != nil {
 		return "", fmt.Errorf("构建 system prompt 失败: %w", err)
 	}
@@ -140,7 +140,7 @@ func (s *ChatService) Stream(ctx context.Context, userID string, history []Conve
 	return string(content), nil
 }
 
-func (s *ChatService) loadUserProfileSummary(ctx context.Context, userID string) (string, error) {
+func (s *ChatService) loadUserFactSummary(ctx context.Context, userID string) (string, error) {
 	if s.memories == nil {
 		return "", nil
 	}
@@ -165,7 +165,7 @@ func (s *ChatService) loadUserProfileSummary(ctx context.Context, userID string)
 	used := 0
 	for _, line := range lines {
 		cost := utf8.RuneCountInString(line)
-		// 至少保留最新一条完整记忆；不切断单条内容，避免丢掉过敏、禁忌等关键安全信息的后半段。
+		// 至少保留最新一条完整记忆；不切断单条内容，避免丢掉项目边界等关键事实的后半段。
 		if len(kept) > 0 && s.memoryBudget.MaxChars > 0 && used+cost > s.memoryBudget.MaxChars {
 			break
 		}

@@ -1,4 +1,4 @@
-// Command server 是健康管理 Agent 的 HTTP 服务入口。
+// Command server 是面试训练 Agent 的 HTTP 服务入口。
 package main
 
 import (
@@ -53,7 +53,7 @@ func run() error {
 		log.Warn("未配置 DEEPSEEK_API_KEY，对话将返回降级兜底回复（请在 .env 中填入）")
 	}
 	client := llm.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL, cfg.DeepSeek.Model, cfg.DeepSeek.Temperature, time.Duration(cfg.DeepSeek.TimeoutSeconds)*time.Second)
-	prompt, err := service.LoadChatPrompt(cfg.Chat.PromptPath, cfg.Chat.PromptVersion, cfg.Chat.SafetyBoundary)
+	prompt, err := service.LoadChatPrompt(cfg.Chat.PromptPath, cfg.Chat.PromptVersion, cfg.Chat.TrustBoundary)
 	if err != nil {
 		return err
 	}

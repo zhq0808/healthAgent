@@ -18,8 +18,8 @@ import (
 // turn 租约表结构本身（约束/索引），不经过任何 repository/service 代码——
 // 获取/释放租约的业务逻辑是后续独立的修改点，这里先把数据库模型钉死。
 func TestAgentTurnLeaseSchemaEnforcesSingleActiveTurnPerSession(t *testing.T) {
-	if os.Getenv("HEALTH_AGENT_INTEGRATION_TEST") != "1" {
-		t.Skip("set HEALTH_AGENT_INTEGRATION_TEST=1 to run PostgreSQL integration tests")
+	if os.Getenv("INTERVIEW_AGENT_INTEGRATION_TEST") != "1" {
+		t.Skip("set INTERVIEW_AGENT_INTEGRATION_TEST=1 to run PostgreSQL integration tests")
 	}
 
 	cfg, err := config.Load("../../config.yaml")

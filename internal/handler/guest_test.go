@@ -51,7 +51,7 @@ func TestGuestHandlerCreatesCookieAndReusesIdentity(t *testing.T) {
 	server := &Server{
 		identity: identityService,
 		identityConfig: config.IdentityConfig{
-			GuestCookieName: "health_guest_test",
+			GuestCookieName: "interview_guest_test",
 			CookieSecure:    false,
 		},
 		log: slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -75,7 +75,7 @@ func TestGuestHandlerCreatesCookieAndReusesIdentity(t *testing.T) {
 		t.Fatalf("cookie count = %d, want 1", len(cookies))
 	}
 	cookie := cookies[0]
-	if cookie.Name != "health_guest_test" || !cookie.HttpOnly || cookie.SameSite != http.SameSiteLaxMode {
+	if cookie.Name != "interview_guest_test" || !cookie.HttpOnly || cookie.SameSite != http.SameSiteLaxMode {
 		t.Fatalf("cookie = %+v, want named HttpOnly SameSite=Lax cookie", cookie)
 	}
 	if cookie.Path != "/" || cookie.MaxAge <= 0 || cookie.Value == "" {

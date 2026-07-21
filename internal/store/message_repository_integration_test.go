@@ -18,8 +18,8 @@ import (
 )
 
 func TestPostgresMessageRepositoryAppendsUserMessagesIdempotently(t *testing.T) {
-	if os.Getenv("HEALTH_AGENT_INTEGRATION_TEST") != "1" {
-		t.Skip("set HEALTH_AGENT_INTEGRATION_TEST=1 to run PostgreSQL integration tests")
+	if os.Getenv("INTERVIEW_AGENT_INTEGRATION_TEST") != "1" {
+		t.Skip("set INTERVIEW_AGENT_INTEGRATION_TEST=1 to run PostgreSQL integration tests")
 	}
 
 	cfg, err := config.Load("../../config.yaml")
@@ -148,8 +148,8 @@ func TestPostgresMessageRepositoryAppendsUserMessagesIdempotently(t *testing.T) 
 }
 
 func TestPostgresMessageRepositoryLoadsRecentCompletedHistory(t *testing.T) {
-	if os.Getenv("HEALTH_AGENT_INTEGRATION_TEST") != "1" {
-		t.Skip("set HEALTH_AGENT_INTEGRATION_TEST=1 to run PostgreSQL integration tests")
+	if os.Getenv("INTERVIEW_AGENT_INTEGRATION_TEST") != "1" {
+		t.Skip("set INTERVIEW_AGENT_INTEGRATION_TEST=1 to run PostgreSQL integration tests")
 	}
 
 	cfg, err := config.Load("../../config.yaml")
@@ -185,13 +185,13 @@ func TestPostgresMessageRepositoryLoadsRecentCompletedHistory(t *testing.T) {
 		INSERT INTO agent_memory_episodic
 			(message_id, session_id, user_id, agent_id, seq, role, status, content, deleted_at)
 		VALUES
-			(gen_random_uuid(), $1, $2, 'health-agent', 1, 'user',      'completed', 'old user',          NULL),
-			(gen_random_uuid(), $1, $2, 'health-agent', 2, 'assistant', 'completed', 'old assistant',     NULL),
-			(gen_random_uuid(), $1, $2, 'health-agent', 3, 'system',    'completed', 'hidden system',     NULL),
-			(gen_random_uuid(), $1, $2, 'health-agent', 4, 'user',      'failed',    'hidden failed',     NULL),
-			(gen_random_uuid(), $1, $2, 'health-agent', 5, 'assistant', 'completed', 'hidden deleted',    now()),
-			(gen_random_uuid(), $1, $2, 'health-agent', 6, 'user',      'completed', 'latest user',       NULL),
-			(gen_random_uuid(), $3, $2, 'health-agent', 1, 'user',      'completed', 'hidden session',    NULL)`, sessionID, userID, deletedSession); err != nil {
+			(gen_random_uuid(), $1, $2, 'interview-agent', 1, 'user',      'completed', 'old user',          NULL),
+			(gen_random_uuid(), $1, $2, 'interview-agent', 2, 'assistant', 'completed', 'old assistant',     NULL),
+			(gen_random_uuid(), $1, $2, 'interview-agent', 3, 'system',    'completed', 'hidden system',     NULL),
+			(gen_random_uuid(), $1, $2, 'interview-agent', 4, 'user',      'failed',    'hidden failed',     NULL),
+			(gen_random_uuid(), $1, $2, 'interview-agent', 5, 'assistant', 'completed', 'hidden deleted',    now()),
+			(gen_random_uuid(), $1, $2, 'interview-agent', 6, 'user',      'completed', 'latest user',       NULL),
+			(gen_random_uuid(), $3, $2, 'interview-agent', 1, 'user',      'completed', 'hidden session',    NULL)`, sessionID, userID, deletedSession); err != nil {
 		t.Fatalf("insert history fixtures: %v", err)
 	}
 
@@ -256,8 +256,8 @@ func TestPostgresMessageRepositoryLoadsRecentCompletedHistory(t *testing.T) {
 }
 
 func TestPostgresMessageRepositoryAppendsAssistantInSequence(t *testing.T) {
-	if os.Getenv("HEALTH_AGENT_INTEGRATION_TEST") != "1" {
-		t.Skip("set HEALTH_AGENT_INTEGRATION_TEST=1 to run PostgreSQL integration tests")
+	if os.Getenv("INTERVIEW_AGENT_INTEGRATION_TEST") != "1" {
+		t.Skip("set INTERVIEW_AGENT_INTEGRATION_TEST=1 to run PostgreSQL integration tests")
 	}
 
 	cfg, err := config.Load("../../config.yaml")

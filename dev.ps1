@@ -56,7 +56,7 @@ if (-not $SkipDocker) {
     Write-Step '等待 PostgreSQL 就绪...'
     $deadline = (Get-Date).AddSeconds(60)
     while ($true) {
-        $status = (docker inspect -f '{{.State.Health.Status}}' health-postgres 2>$null)
+        $status = (docker inspect -f '{{.State.Health.Status}}' interview-postgres 2>$null)
         if ($status -eq 'healthy') { break }
         if ((Get-Date) -gt $deadline) {
             throw 'PostgreSQL 60 秒内未就绪，请检查：docker compose logs postgres'

@@ -33,13 +33,13 @@ func testChatPrompt(t *testing.T) *ChatPrompt {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "chat.tmpl")
 	templateText := `版本={{.Version}}
-安全={{.SafetyBoundary}}
-特征={{.UserProfileSummary}}
-你是健康管家。安全约束 > 已确认用户特征 > 当前问题 > 最近会话历史。`
+可信边界={{.TrustBoundary}}
+事实={{.UserFactSummary}}
+你是面试训练伙伴。可信边界 > 已确认用户事实 > 当前问题 > 最近会话历史。`
 	if err := os.WriteFile(path, []byte(templateText), 0o600); err != nil {
 		t.Fatalf("write prompt template: %v", err)
 	}
-	prompt, err := LoadChatPrompt(path, "test-v2", "禁止诊断和处方")
+	prompt, err := LoadChatPrompt(path, "test-v2", "禁止夸大用户经历或掌握状态")
 	if err != nil {
 		t.Fatalf("LoadChatPrompt() error = %v", err)
 	}
@@ -86,7 +86,7 @@ func TestChatServiceStreamBuildsMessages(t *testing.T) {
 	if model.messages[0].Role != "system" {
 		t.Fatalf("system message = %#v", model.messages[0])
 	}
-	for _, required := range []string{"test-v2", "禁止诊断和处方", noConfirmedUserProfile, "健康管家"} {
+	for _, required := range []string{"test-v2", "禁止夸大用户经历或掌握状态", noConfirmedUserFacts, "面试训练伙伴"} {
 		if !strings.Contains(model.messages[0].Content, required) {
 			t.Fatalf("system prompt missing %q: %q", required, model.messages[0].Content)
 		}

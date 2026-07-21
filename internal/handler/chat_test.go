@@ -547,7 +547,7 @@ func newChatHandlerTestServerWithLease(messageRepository service.MessageReposito
 		"session_0123456789abcdef0123456789abcdef": "usr_owner",
 	}}
 	prompt, err := service.ParseChatPrompt(
-		"版本={{.Version}} 安全={{.SafetyBoundary}} 特征={{.UserProfileSummary}}",
+		"版本={{.Version}} 边界={{.TrustBoundary}} 事实={{.UserFactSummary}}",
 		"handler-test-v2",
 		"测试安全边界",
 	)

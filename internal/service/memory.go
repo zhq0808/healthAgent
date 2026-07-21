@@ -13,7 +13,7 @@ import (
 )
 
 // MemoryAgentID 是当前唯一的业务 Agent，记忆全部归属它。
-const MemoryAgentID = HealthAgentID
+const MemoryAgentID = InterviewAgentID
 
 // 记忆操作类型，对应抽取 LLM 契约与 agent_memory_history.action。
 const (

@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const HealthAgentID = "health-agent"
+const InterviewAgentID = "interview-agent"
 
 var ErrClientMessageConflict = errors.New("client_message_id 已用于其他消息内容")
 var ErrEmptyAssistantMessage = errors.New("assistant 消息不能为空")

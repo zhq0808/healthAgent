@@ -90,7 +90,7 @@ func traceMiddleware() gin.HandlerFunc {
 }
 
 // recoverMiddleware 捕获 panic，避免单个请求崩掉整个服务。
-// 注意：不记录请求体，避免泄露敏感健康数据。
+// 注意：不记录请求体，避免泄露简历、面试回答等敏感用户数据。
 func recoverMiddleware(log *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
@@ -110,7 +110,7 @@ func recoverMiddleware(log *slog.Logger) gin.HandlerFunc {
 }
 
 // accessLogMiddleware 记录请求耗时与状态码。仅记录安全字段，
-// 绝不记录 query/body/header 中可能含健康数据的内容。
+// 绝不记录 query/body/header 中可能含用户隐私的内容。
 func accessLogMiddleware(log *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()

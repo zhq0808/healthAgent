@@ -54,7 +54,7 @@ type HTTPConfig struct {
 
 // IdentityConfig 控制 Guest 设备凭证和 Cookie 的生命周期。
 type IdentityConfig struct {
-	GuestCookieName    string `yaml:"guest_cookie_name"     env:"GUEST_COOKIE_NAME"      env-default:"health_guest"`
+	GuestCookieName    string `yaml:"guest_cookie_name"     env:"GUEST_COOKIE_NAME"      env-default:"interview_guest"`
 	GuestTokenTTLHours int    `yaml:"guest_token_ttl_hours" env:"GUEST_TOKEN_TTL_HOURS" env-default:"8760"`
 	CookieSecure       bool   `yaml:"cookie_secure"         env:"COOKIE_SECURE"         env-default:"false"`
 }
@@ -72,10 +72,10 @@ type LLMConfig struct {
 type ChatConfig struct {
 	// MaxReplyChars 是单条 assistant 回复累积的最大字符数上限，防止模型异常时（例如陷入重复输出）
 	// 无限占用内存并写入一条超大的数据库行。<=0 时回退为 service.DefaultMaxReplyChars。
-	MaxReplyChars  int    `yaml:"max_reply_chars" env:"MAX_REPLY_CHARS" env-default:"4000"`
-	PromptPath     string `yaml:"prompt_path" env:"PROMPT_PATH" env-default:"prompts/health_chat_v1.tmpl"`
-	PromptVersion  string `yaml:"prompt_version" env:"PROMPT_VERSION" env-default:"health-chat-v1"`
-	SafetyBoundary string `yaml:"safety_boundary" env:"SAFETY_BOUNDARY" env-default:"健康建议仅供一般信息参考，不能替代医生面诊、诊断或治疗。"`
+	MaxReplyChars int    `yaml:"max_reply_chars" env:"MAX_REPLY_CHARS" env-default:"4000"`
+	PromptPath    string `yaml:"prompt_path" env:"PROMPT_PATH" env-default:"prompts/interview_chat_v1.tmpl"`
+	PromptVersion string `yaml:"prompt_version" env:"PROMPT_VERSION" env-default:"interview-chat-v1"`
+	TrustBoundary string `yaml:"trust_boundary" env:"TRUST_BOUNDARY" env-default:"不得把阅读、AI 生成内容或个人 Demo 夸大为已掌握或生产实践；关键事实和状态变化必须有证据并经用户确认。"`
 }
 
 // OpenAIConfig 是你后续新增的 OpenAI 配置
@@ -97,7 +97,7 @@ type PostgresConfig struct {
 	Port            int    `yaml:"port"              env:"PORT"              env-default:"5433"`
 	User            string `yaml:"user"              env:"USER"              env-default:"postgres"`
 	Password        string `yaml:"-"                 env:"PASSWORD"          env-default:"root"`
-	DBName          string `yaml:"dbname"            env:"DBNAME"            env-default:"health_db"`
+	DBName          string `yaml:"dbname"            env:"DBNAME"            env-default:"interview_agent_db"`
 	MaxOpenConns    int    `yaml:"max_open_conns"    env:"MAX_OPEN_CONNS"    env-default:"50"`
 	MaxIdleConns    int    `yaml:"max_idle_conns"    env:"MAX_IDLE_CONNS"    env-default:"10"`
 	ConnMaxLifetime int    `yaml:"conn_max_lifetime" env:"CONN_MAX_LIFETIME" env-default:"3600"` // 单位：秒

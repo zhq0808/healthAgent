@@ -13,8 +13,8 @@ import (
 )
 
 func TestPostgresSessionRepositoryListsOwnedSessionsDeterministically(t *testing.T) {
-	if os.Getenv("HEALTH_AGENT_INTEGRATION_TEST") != "1" {
-		t.Skip("set HEALTH_AGENT_INTEGRATION_TEST=1 to run PostgreSQL integration tests")
+	if os.Getenv("INTERVIEW_AGENT_INTEGRATION_TEST") != "1" {
+		t.Skip("set INTERVIEW_AGENT_INTEGRATION_TEST=1 to run PostgreSQL integration tests")
 	}
 
 	cfg, err := config.Load("../../config.yaml")

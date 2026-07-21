@@ -36,7 +36,7 @@ export interface SessionMessage {
   created_at: string;
 }
 
-const sessionIDKey = "health_agent_session_id_v2";
+const sessionIDKey = "interview_agent_session_id_v1";
 
 // ModelOption 是可选的对话模型。目前后端使用配置里的单一模型，模型选择仅前端展示与本地记忆；
 // TODO(后端): 支持 per-request model 后，把 selectedModel 随 chat 请求下发并按归属校验。
@@ -52,7 +52,7 @@ export const MODELS: ModelOption[] = [
 ];
 
 export const DEFAULT_MODEL_ID = "deepseek-chat";
-const modelIDKey = "health_agent_model_id";
+const modelIDKey = "interview_agent_model_id";
 
 // getSelectedModelID 读取本地记住的模型；非法或缺省时回退默认模型。
 export function getSelectedModelID(): string {

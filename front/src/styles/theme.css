@@ -40,11 +40,11 @@
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
   
-  /* Health App Theme Colors */
-  --health-accent: #A8D5BA;
-  --health-warning: #F4A460;
-  --health-info: #B8D4E8;
-  --health-tag-bg: #EEF2E8;
+  /* Interview Learning App Theme Colors */
+  --learning-accent: #A8D5BA;
+  --learning-warning: #F4A460;
+  --learning-info: #B8D4E8;
+  --learning-tag-bg: #EEF2E8;
 }
 
 .dark {

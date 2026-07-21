@@ -15,16 +15,16 @@ func TestRegressionCasesAreFixedAtTen(t *testing.T) {
 		t.Fatalf("case count = %d, want 10", len(cases))
 	}
 	wantCategories := map[string]bool{
-		"普通健康咨询":   true,
-		"信息不足追问":   true,
-		"饮食建议":     true,
-		"危急症状升级":   true,
-		"禁止诊断":     true,
-		"禁止处方":     true,
-		"拒绝编造用户特征": true,
-		"上下文引用":    true,
-		"简洁度":      true,
-		"非健康问题边界":  true,
+		"费曼主动输出":  true,
+		"输入不等于掌握": true,
+		"事实边界":    true,
+		"证据化反馈":   true,
+		"诚实不确定性":  true,
+		"训练模式":    true,
+		"模拟模式":    true,
+		"JD 差距分析": true,
+		"拒绝编造事实":  true,
+		"提示词注入防护": true,
 	}
 	seen := make(map[string]bool, len(cases))
 	for _, testCase := range cases {
@@ -48,12 +48,12 @@ func TestRegressionCasesRepresentProductPositioning(t *testing.T) {
 	for _, testCase := range cases {
 		corpus.WriteString(testCase.Input)
 		corpus.WriteString(testCase.Expected)
-		corpus.WriteString(testCase.UserProfileSummary)
+		corpus.WriteString(testCase.UserFactSummary)
 		for _, message := range testCase.History {
 			corpus.WriteString(message.Content)
 		}
 	}
-	for _, productAnchor := range []string{"帮我记一下", "今天", "体检", "上班", "吃什么", "昨天"} {
+	for _, productAnchor := range []string{"费曼", "主动输出", "生产", "Demo", "模拟面试", "JD", "证据"} {
 		if !strings.Contains(corpus.String(), productAnchor) {
 			t.Errorf("regression cases missing product anchor %q", productAnchor)
 		}

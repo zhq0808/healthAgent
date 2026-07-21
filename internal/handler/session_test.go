@@ -215,7 +215,7 @@ func TestListSessionMessagesHandlerAllowsArchivedOwnedSession(t *testing.T) {
 func TestListSessionMessagesHandlerReturnsNotFoundForOtherUsersSession(t *testing.T) {
 	const sessionID = "session_0123456789abcdef0123456789abcdef"
 	messageRepository := &handlerMessageRepository{
-		sessionMessages: []service.SessionMessage{{MessageID: "m1", Role: "user", Content: "别人的健康问题", Seq: 1}},
+		sessionMessages: []service.SessionMessage{{MessageID: "m1", Role: "user", Content: "别人的面试回答", Seq: 1}},
 	}
 	server := &Server{
 		sessions: service.NewSessionService(&handlerSessionRepository{owners: map[string]string{sessionID: "usr_other"}}),
@@ -228,7 +228,7 @@ func TestListSessionMessagesHandlerReturnsNotFoundForOtherUsersSession(t *testin
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusNotFound, recorder.Body.String())
 	}
-	if strings.Contains(recorder.Body.String(), "别人的健康问题") {
+	if strings.Contains(recorder.Body.String(), "别人的面试回答") {
 		t.Fatalf("body = %q, must not leak another user's message content", recorder.Body.String())
 	}
 }

@@ -16,8 +16,8 @@ import (
 )
 
 func TestPostgresTurnLeaseRepositoryAcquireAndRelease(t *testing.T) {
-	if os.Getenv("HEALTH_AGENT_INTEGRATION_TEST") != "1" {
-		t.Skip("set HEALTH_AGENT_INTEGRATION_TEST=1 to run PostgreSQL integration tests")
+	if os.Getenv("INTERVIEW_AGENT_INTEGRATION_TEST") != "1" {
+		t.Skip("set INTERVIEW_AGENT_INTEGRATION_TEST=1 to run PostgreSQL integration tests")
 	}
 
 	cfg, err := config.Load("../../config.yaml")
@@ -229,8 +229,8 @@ func TestPostgresTurnLeaseRepositoryAcquireAndRelease(t *testing.T) {
 // active（不是插入新行），因为 (session_id, client_message_id) 是全局唯一约束，同一条消息永远
 // 只能有一条租约记录。
 func TestPostgresTurnLeaseRepositoryAcquireReopensFailedLeaseForRetry(t *testing.T) {
-	if os.Getenv("HEALTH_AGENT_INTEGRATION_TEST") != "1" {
-		t.Skip("set HEALTH_AGENT_INTEGRATION_TEST=1 to run PostgreSQL integration tests")
+	if os.Getenv("INTERVIEW_AGENT_INTEGRATION_TEST") != "1" {
+		t.Skip("set INTERVIEW_AGENT_INTEGRATION_TEST=1 to run PostgreSQL integration tests")
 	}
 
 	cfg, err := config.Load("../../config.yaml")
@@ -356,8 +356,8 @@ func TestPostgresTurnLeaseRepositoryAcquireReopensFailedLeaseForRetry(t *testing
 // （模拟两个进程/两个 repository 实例）并发抢同一个 Session 的 turn，验证互斥由数据库短事务
 // 保证，而不是靠 Go 进程内的内存锁。
 func TestPostgresTurnLeaseRepositoryAcquireIsSerializedAcrossInstances(t *testing.T) {
-	if os.Getenv("HEALTH_AGENT_INTEGRATION_TEST") != "1" {
-		t.Skip("set HEALTH_AGENT_INTEGRATION_TEST=1 to run PostgreSQL integration tests")
+	if os.Getenv("INTERVIEW_AGENT_INTEGRATION_TEST") != "1" {
+		t.Skip("set INTERVIEW_AGENT_INTEGRATION_TEST=1 to run PostgreSQL integration tests")
 	}
 
 	cfg, err := config.Load("../../config.yaml")

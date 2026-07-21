@@ -255,8 +255,8 @@ func TestPostgresMemoryRepositoryRejectsCrossUserSource(t *testing.T) {
 
 func requireMemoryTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	if os.Getenv("HEALTH_AGENT_INTEGRATION_TEST") != "1" {
-		t.Skip("set HEALTH_AGENT_INTEGRATION_TEST=1 to run PostgreSQL integration tests")
+	if os.Getenv("INTERVIEW_AGENT_INTEGRATION_TEST") != "1" {
+		t.Skip("set INTERVIEW_AGENT_INTEGRATION_TEST=1 to run PostgreSQL integration tests")
 	}
 	cfg, err := config.Load("../../config.yaml")
 	if err != nil {
@@ -289,7 +289,7 @@ func insertMemorySourceMessage(t *testing.T, pool *pgxpool.Pool, sessionID, user
 	defer cancel()
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO agent_memory_episodic (message_id, session_id, user_id, agent_id, seq, role, status, content)
-		VALUES ($1, $2, $3, 'health-agent', $4, 'user', 'completed', $5)`,
+		VALUES ($1, $2, $3, 'interview-agent', $4, 'user', 'completed', $5)`,
 		messageID, sessionID, userID, seq, content); err != nil {
 		t.Fatalf("insert source message %s: %v", messageID, err)
 	}

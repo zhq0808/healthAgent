@@ -1,19 +1,19 @@
-# 健康管理 Agent 配置（非敏感项）。敏感项（API Key）走 .env，不写这里。
+# 面试训练 Agent 配置（非敏感项）。敏感项（API Key）走 .env，不写这里。
 http:
   port: "8091"
 
 # Guest 设备凭证。生产 HTTPS 环境必须通过 IDENTITY_COOKIE_SECURE=true 开启 Secure。
 identity:
-  guest_cookie_name: "health_guest"
+  guest_cookie_name: "interview_guest"
   guest_token_ttl_hours: 8760  # 1 年；过期或清除 Cookie 后无法恢复未绑定 Guest
   cookie_secure: false         # 本地 HTTP；生产环境必须覆盖为 true
 
 # 聊天业务层配置（不是大模型传输层配置，那部分在 deepseek/openai 下面）。
 chat:
   max_reply_chars: 4000  # 单条 assistant 回复累积上限，超过截断收尾，防止异常输出撑爆内存/数据库行
-  prompt_path: "prompts/health_chat_v1.tmpl"
-  prompt_version: "health-chat-v1"
-  safety_boundary: "健康建议仅供一般信息参考，不能替代医生面诊、诊断或治疗。"
+  prompt_path: "prompts/interview_chat_v1.tmpl"
+  prompt_version: "interview-chat-v1"
+  trust_boundary: "不得把阅读、AI 生成内容或个人 Demo 夸大为已掌握或生产实践；关键事实和状态变化必须有证据并经用户确认。"
 
 deepseek:
   base_url: "https://api.deepseek.com"
@@ -26,7 +26,7 @@ postgres:
   host: "127.0.0.1"
   port: 5433            # 对齐 docker-compose 暴露的宿主机端口
   user: "postgres"
-  dbname: "health_db"
+  dbname: "interview_agent_db"
   max_open_conns: 50    # 连接池：最大打开连接数
   max_idle_conns: 10    # 空闲连接数
   conn_max_lifetime: 3600  # 连接最长存活（秒）

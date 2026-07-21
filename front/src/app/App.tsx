@@ -127,7 +127,7 @@ function mapBackendMessages(items: SessionMessage[]): Message[] {
   }));
 }
 
-function HealthWorkspace() {
+function InterviewWorkspace() {
   const [tags, setTags] = useState<StatusTagDef[]>(INITIAL_TAGS);
   const [actions, setActions] = useState<ActionItem[]>(initialActions);
   const [messages, setMessages] = useState<Message[]>([
@@ -725,7 +725,7 @@ function HealthWorkspace() {
 }
 
 export default function App() {
-  const guestStartedKey = "health_agent_guest_started";
+  const guestStartedKey = "interview_agent_guest_started";
   const [authState, setAuthState] = useState<"auth" | "restoring" | "guest">(() =>
     localStorage.getItem(guestStartedKey) === "1" ? "restoring" : "auth"
   );
@@ -757,7 +757,7 @@ export default function App() {
   };
 
   if (authState === "guest") {
-    return <HealthWorkspace />;
+    return <InterviewWorkspace />;
   }
 
   if (authState === "restoring") {

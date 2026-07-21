@@ -14,7 +14,7 @@
 CREATE TABLE agent_memory_meta (
     memory_id                UUID         PRIMARY KEY,          -- 后端 UUIDv7，业务主键
     user_id                  VARCHAR(64)  NOT NULL,             -- 归属用户，由可信上下文写入
-    agent_id                 VARCHAR(64)  NOT NULL,             -- 当前固定 health-agent
+    agent_id                 VARCHAR(64)  NOT NULL,             -- 当前固定 interview-agent
     memory_type              VARCHAR(20)  NOT NULL,             -- 可容错标签，允许 other
     memory_value             TEXT         NOT NULL,             -- 一条原子自然语言记忆
     confidence               NUMERIC(3,2),                      -- LLM 自评置信度，仅辅助
@@ -50,7 +50,7 @@ CREATE TRIGGER trg_meta_updated_at
 COMMENT ON TABLE  agent_memory_meta IS '用户长期记忆当前有效快照（开放原子记忆），聊天召回只读这张';
 COMMENT ON COLUMN agent_memory_meta.memory_id                IS '记忆业务主键，后端 UUIDv7';
 COMMENT ON COLUMN agent_memory_meta.user_id                  IS '归属用户ID，由可信上下文写入';
-COMMENT ON COLUMN agent_memory_meta.agent_id                 IS '业务 Agent，当前固定 health-agent';
+COMMENT ON COLUMN agent_memory_meta.agent_id                 IS '业务 Agent，当前固定 interview-agent';
 COMMENT ON COLUMN agent_memory_meta.memory_type              IS '可容错标签: preference/goal/habit/context/other，不参与唯一约束/定位';
 COMMENT ON COLUMN agent_memory_meta.memory_value             IS '一条原子自然语言记忆，一条只表达一个可独立更新的意思';
 COMMENT ON COLUMN agent_memory_meta.confidence               IS 'LLM 自评置信度 0.00-1.00，仅作辅助门槛';
