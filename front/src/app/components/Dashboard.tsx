@@ -10,6 +10,7 @@ import {
   Mic2,
   Pencil,
   Plus,
+  Sparkles,
   X,
 } from "lucide-react";
 import {
@@ -21,6 +22,7 @@ import {
   DialogTitle,
 } from "./ui/dialog";
 import { Input } from "./ui/input";
+import { Textarea } from "./ui/textarea";
 import {
   Select,
   SelectContent,
@@ -53,6 +55,11 @@ interface TodoDraft {
   durationMinutes: string;
 }
 
+interface DailyReview {
+  learned: string[];
+  gaps: string[];
+}
+
 interface DayProgress {
   completed: number;
   total: number;
@@ -63,6 +70,16 @@ const EMPTY_TODO_DRAFT: TodoDraft = {
   title: "",
   type: "知识点回顾",
   durationMinutes: "10",
+};
+const INITIAL_DAILY_REVIEW: DailyReview = {
+  learned: [
+    "梳理了 Kafka 消息积压从消费速率、分区倾斜到下游阻塞的排查链路。",
+    "能用自己的话说明 Go GC 三色标记中黑、灰、白对象的含义。",
+  ],
+  gaps: [
+    "写屏障在并发标记期间如何防止对象误回收，还不能脱离提示讲清。",
+    "有界 Worker Pool 的取消与错误收敛尚未完成编码验证。",
+  ],
 };
 
 const INITIAL_TODOS: TodoItem[] = [
@@ -255,6 +272,9 @@ export function Dashboard({ onClose, mode = "drawer" }: DashboardProps) {
   const [editingTodoID, setEditingTodoID] = useState<string | null>(null);
   const [draft, setDraft] = useState<TodoDraft>(EMPTY_TODO_DRAFT);
   const [editorError, setEditorError] = useState("");
+  const [dailyReview, setDailyReview] = useState(INITIAL_DAILY_REVIEW);
+  const [reviewEditorOpen, setReviewEditorOpen] = useState(false);
+  const [reviewDraft, setReviewDraft] = useState({ learned: "", gaps: "" });
   const completedCount = todos.filter((todo) => todo.completed).length;
   const completionRate = Math.round((completedCount / todos.length) * 100);
 
@@ -325,6 +345,28 @@ export function Dashboard({ onClose, mode = "drawer" }: DashboardProps) {
       ]);
     }
     setEditorOpen(false);
+  };
+
+  const openReviewEditor = () => {
+    setReviewDraft({
+      learned: dailyReview.learned.join("\n"),
+      gaps: dailyReview.gaps.join("\n"),
+    });
+    setReviewEditorOpen(true);
+  };
+
+  const saveReview = () => {
+    const parseLines = (value: string) =>
+      value
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+    setDailyReview({
+      learned: parseLines(reviewDraft.learned),
+      gaps: parseLines(reviewDraft.gaps),
+    });
+    setReviewEditorOpen(false);
   };
 
   return (
@@ -458,6 +500,73 @@ export function Dashboard({ onClose, mode = "drawer" }: DashboardProps) {
             })}
           </div>
         </section>
+
+        <div className="my-5 h-px bg-border" />
+
+        <section aria-labelledby="daily-review-title">
+          <div className="mb-4 flex items-end justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-1.5 text-[11px] font-medium text-primary">
+                <Sparkles size={12} />
+                <span>AI 总结</span>
+              </div>
+              <h3 id="daily-review-title" className="mt-0.5 text-[17px] font-semibold text-foreground">
+                今日复盘
+              </h3>
+            </div>
+            <button
+              type="button"
+              onClick={openReviewEditor}
+              aria-label="编辑今日复盘"
+              title="编辑今日复盘"
+              className="flex size-8 items-center justify-center rounded-full bg-secondary text-primary transition-colors hover:bg-accent"
+            >
+              <Pencil size={14} />
+            </button>
+          </div>
+
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
+            <div className="border-b border-border px-4 py-4">
+              <div className="mb-2 flex items-center gap-2">
+                <span className="flex size-5 items-center justify-center rounded-full bg-[#E4F1E8] text-[11px] font-semibold text-[#2E6941]">✓</span>
+                <h4 className="text-[12px] font-semibold text-foreground">今天学习了</h4>
+              </div>
+              {dailyReview.learned.length > 0 ? (
+                <ul className="space-y-2 pl-7">
+                  {dailyReview.learned.map((item) => (
+                    <li key={item} className="relative text-[11px] leading-5 text-muted-foreground before:absolute before:-left-3.5 before:top-2 before:size-1 before:rounded-full before:bg-primary">
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="pl-7 text-[11px] text-muted-foreground">今天还没有形成学习总结。</p>
+              )}
+            </div>
+
+            <div className="px-4 py-4">
+              <div className="mb-2 flex items-center gap-2">
+                <span className="flex size-5 items-center justify-center rounded-full bg-[#FFF4D9] text-[12px] font-semibold text-[#946B16]">!</span>
+                <h4 className="text-[12px] font-semibold text-foreground">还没有掌握</h4>
+              </div>
+              {dailyReview.gaps.length > 0 ? (
+                <ul className="space-y-2 pl-7">
+                  {dailyReview.gaps.map((item) => (
+                    <li key={item} className="relative text-[11px] leading-5 text-muted-foreground before:absolute before:-left-3.5 before:top-2 before:size-1 before:rounded-full before:bg-[#D59A2F]">
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="pl-7 text-[11px] text-muted-foreground">暂时没有待补强的知识点。</p>
+              )}
+            </div>
+          </div>
+
+          <p className="mt-2.5 text-[10px] leading-4 text-muted-foreground">
+            AI 根据今天的练习与完成证据生成，你可以按实际情况修正。
+          </p>
+        </section>
       </div>
 
       <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
@@ -538,6 +647,59 @@ export function Dashboard({ onClose, mode = "drawer" }: DashboardProps) {
               className="rounded-lg bg-primary px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-primary/90"
             >
               {editingTodoID ? "保存修改" : "添加 Todo"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={reviewEditorOpen} onOpenChange={setReviewEditorOpen}>
+        <DialogContent className="z-[70] max-w-[360px] gap-5 rounded-2xl border-border bg-white p-5">
+          <DialogHeader className="text-left">
+            <DialogTitle>编辑今日复盘</DialogTitle>
+            <DialogDescription>每行填写一项，修正 AI 总结与实际掌握情况。</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <label className="block">
+              <span className="mb-1.5 block text-[12px] font-medium text-foreground">今天学习了</span>
+              <Textarea
+                value={reviewDraft.learned}
+                onChange={(event) =>
+                  setReviewDraft((current) => ({ ...current, learned: event.target.value }))
+                }
+                placeholder="每行填写一项今天学会的内容"
+                className="min-h-28"
+                autoFocus
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-1.5 block text-[12px] font-medium text-foreground">还没有掌握</span>
+              <Textarea
+                value={reviewDraft.gaps}
+                onChange={(event) =>
+                  setReviewDraft((current) => ({ ...current, gaps: event.target.value }))
+                }
+                placeholder="每行填写一项仍需补强的知识点"
+                className="min-h-28"
+              />
+            </label>
+          </div>
+
+          <DialogFooter className="flex-row justify-end">
+            <button
+              type="button"
+              onClick={() => setReviewEditorOpen(false)}
+              className="rounded-lg px-4 py-2 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-secondary"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={saveReview}
+              className="rounded-lg bg-primary px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-primary/90"
+            >
+              保存修改
             </button>
           </DialogFooter>
         </DialogContent>
