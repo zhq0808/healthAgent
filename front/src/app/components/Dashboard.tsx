@@ -30,6 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
+import { ProfileButton } from "./ProfileButton";
 
 const TODO_TYPES = [
   { label: "知识点回顾", icon: BookOpenCheck },
@@ -263,10 +264,11 @@ function CalendarHeatmap({
 
 interface DashboardProps {
   onClose?: () => void;
+  onOpenProfile?: () => void;
   mode?: "drawer" | "page";
 }
 
-export function Dashboard({ onClose, mode = "drawer" }: DashboardProps) {
+export function Dashboard({ onClose, onOpenProfile, mode = "drawer" }: DashboardProps) {
   const [todos, setTodos] = useState(INITIAL_TODOS);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingTodoID, setEditingTodoID] = useState<string | null>(null);
@@ -395,6 +397,9 @@ export function Dashboard({ onClose, mode = "drawer" }: DashboardProps) {
           <span className="rounded-full bg-secondary px-2.5 py-1 text-[10px] text-muted-foreground">
             演示数据
           </span>
+          {mode === "page" && onOpenProfile && (
+            <ProfileButton onClick={onOpenProfile} />
+          )}
           {mode === "drawer" && onClose && (
             <button
               type="button"

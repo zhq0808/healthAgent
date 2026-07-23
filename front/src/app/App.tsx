@@ -16,6 +16,7 @@ import { SessionDrawer } from "./components/SessionDrawer";
 import { Dashboard } from "./components/Dashboard";
 import { BottomNavigation, type AppView } from "./components/BottomNavigation";
 import { KnowledgeBasePage } from "./components/KnowledgeBasePage";
+import { ProfileDashboard } from "./components/ProfileDashboard";
 import {
   createOrResumeGuest,
   ensureSessionID,
@@ -148,6 +149,7 @@ function InterviewWorkspace() {
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
   const [activeView, setActiveView] = useState<AppView>("practice");
+  const [profileOpen, setProfileOpen] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [selectedModelID, setSelectedModelID] = useState<string>(() =>
     getSelectedModelID()
@@ -559,10 +561,13 @@ function InterviewWorkspace() {
 
   return (
     <div className="size-full flex flex-col overflow-hidden bg-background relative">
-      {activeView === "practice" ? (
+      {profileOpen ? (
+        <ProfileDashboard onBack={() => setProfileOpen(false)} />
+      ) : activeView === "practice" ? (
         <>
           <AppHeader
             onOpenSessions={() => setSessionDrawerOpen(true)}
+            onOpenProfile={() => setProfileOpen(true)}
           />
 
           <StatusTags tags={tags} />
@@ -709,18 +714,20 @@ function InterviewWorkspace() {
           />
         </>
       ) : activeView === "plan" ? (
-        <Dashboard mode="page" />
+        <Dashboard mode="page" onOpenProfile={() => setProfileOpen(true)} />
       ) : (
-        <KnowledgeBasePage />
+        <KnowledgeBasePage onOpenProfile={() => setProfileOpen(true)} />
       )}
 
-      <BottomNavigation
-        activeView={activeView}
-        onChange={(view) => {
-          setSessionDrawerOpen(false);
-          setActiveView(view);
-        }}
-      />
+      {!profileOpen && (
+        <BottomNavigation
+          activeView={activeView}
+          onChange={(view) => {
+            setSessionDrawerOpen(false);
+            setActiveView(view);
+          }}
+        />
+      )}
     </div>
   );
 }

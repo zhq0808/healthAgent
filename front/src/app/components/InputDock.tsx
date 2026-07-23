@@ -57,7 +57,7 @@ export function InputDock({
   };
 
   return (
-    <div className="absolute bottom-[66px] left-0 right-0 z-30 bg-gradient-to-t from-[#F6F8F4] via-[#F6F8F4]/96 to-transparent px-5 pb-4 pt-8">
+    <div className="absolute bottom-[80px] left-0 right-0 z-30 bg-gradient-to-t from-[#F6F8F4] via-[#F6F8F4]/96 to-transparent px-5 pb-4 pt-8">
       {/* 快捷提示行；模型选择器放在同一行最左侧（在滚动容器之外，避免向上弹出的菜单被裁剪）。 */}
       <div className="flex items-center gap-2 mb-3">
         {/* 模型选择。当前仅前端选择与本地记忆，后端支持后再随请求下发。 */}

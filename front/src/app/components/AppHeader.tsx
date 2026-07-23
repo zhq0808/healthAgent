@@ -1,13 +1,15 @@
 import { BrainCircuit, PanelLeft } from "lucide-react";
+import { ProfileButton } from "./ProfileButton";
 
 interface AppHeaderProps {
   onOpenSessions: () => void;
+  onOpenProfile: () => void;
 }
 
 // AppHeader 顶部栏：会话入口与品牌。
-export function AppHeader({ onOpenSessions }: AppHeaderProps) {
+export function AppHeader({ onOpenSessions, onOpenProfile }: AppHeaderProps) {
   return (
-    <header className="flex items-center px-5 pt-6 pb-3 bg-background/90 backdrop-blur-sm border-b border-border flex-shrink-0">
+    <header className="flex flex-shrink-0 items-center justify-between border-b border-border bg-background/90 px-5 pb-3 pt-6 backdrop-blur-sm">
       <div className="flex items-center gap-2.5">
         <button
           type="button"
@@ -30,6 +32,7 @@ export function AppHeader({ onOpenSessions }: AppHeaderProps) {
           </p>
         </div>
       </div>
+      <ProfileButton onClick={onOpenProfile} />
     </header>
   );
 }

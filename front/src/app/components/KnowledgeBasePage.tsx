@@ -29,6 +29,7 @@ import {
 } from "./ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Textarea } from "./ui/textarea";
+import { ProfileButton } from "./ProfileButton";
 
 type SourceType = "PDF" | "Markdown" | "网页" | "手动笔记";
 type MasteryLevel = "未掌握" | "有印象" | "能讲清" | "能应用";
@@ -138,7 +139,11 @@ function sourceTypeFor(file: File): SourceType {
   return "Markdown";
 }
 
-export function KnowledgeBasePage() {
+interface KnowledgeBasePageProps {
+  onOpenProfile: () => void;
+}
+
+export function KnowledgeBasePage({ onOpenProfile }: KnowledgeBasePageProps) {
   const [sources, setSources] = useState(INITIAL_SOURCES);
   const [masteryItems, setMasteryItems] = useState(INITIAL_MASTERY);
   const [query, setQuery] = useState("");
@@ -262,7 +267,10 @@ export function KnowledgeBasePage() {
           <h1 className="text-[20px] font-semibold text-foreground">知识库</h1>
           <p className="mt-0.5 text-[12px] text-muted-foreground">管理资料，也管理你真正掌握了什么</p>
         </div>
-        <span className="rounded-full bg-secondary px-2.5 py-1 text-[10px] text-muted-foreground">演示数据</span>
+        <div className="flex items-center gap-2">
+          <span className="rounded-full bg-secondary px-2.5 py-1 text-[10px] text-muted-foreground">演示数据</span>
+          <ProfileButton onClick={onOpenProfile} />
+        </div>
       </header>
 
       <Tabs defaultValue="sources" className="min-h-0 flex-1 gap-0">
