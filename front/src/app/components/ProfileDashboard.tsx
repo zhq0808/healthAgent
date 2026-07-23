@@ -16,12 +16,11 @@ interface ProfileDashboardProps {
 }
 
 const MASTERY_DISTRIBUTION = [
-  { label: "生产验证", count: 3, color: "bg-[#28573A]" },
   { label: "完整验证", count: 5, color: "bg-[#4D8060]" },
-  { label: "可独立实现", count: 4, color: "bg-[#7EAA8B]" },
+  { label: "可独立实现", count: 7, color: "bg-[#7EAA8B]" },
   { label: "能讲清", count: 6, color: "bg-[#AAC9B2]" },
   { label: "仅接触", count: 7, color: "bg-[#D9E4D9]" },
-  { label: "未覆盖", count: 7, color: "bg-[#E9D9C5]" },
+  { label: "暂无证据", count: 7, color: "bg-[#E9D9C5]" },
 ] as const;
 
 const PRIORITY_GAPS = [

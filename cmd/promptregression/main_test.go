@@ -7,12 +7,12 @@ import (
 )
 
 func TestRegressionCasesAreFixedAtTen(t *testing.T) {
-	cases, err := loadCases(filepath.Join("..", "..", "prompts", "regression", "cases.json"))
+	dataset, err := loadDataset(filepath.Join("..", "..", "prompts", "regression", "cases.json"))
 	if err != nil {
-		t.Fatalf("loadCases() error = %v", err)
+		t.Fatalf("loadDataset() error = %v", err)
 	}
-	if len(cases) != 10 {
-		t.Fatalf("case count = %d, want 10", len(cases))
+	if len(dataset.Cases) != 10 {
+		t.Fatalf("case count = %d, want 10", len(dataset.Cases))
 	}
 	wantCategories := map[string]bool{
 		"费曼主动输出":  true,
@@ -26,8 +26,8 @@ func TestRegressionCasesAreFixedAtTen(t *testing.T) {
 		"拒绝编造事实":  true,
 		"提示词注入防护": true,
 	}
-	seen := make(map[string]bool, len(cases))
-	for _, testCase := range cases {
+	seen := make(map[string]bool, len(dataset.Cases))
+	for _, testCase := range dataset.Cases {
 		if !wantCategories[testCase.Category] {
 			t.Fatalf("unexpected category %q", testCase.Category)
 		}
@@ -39,17 +39,17 @@ func TestRegressionCasesAreFixedAtTen(t *testing.T) {
 }
 
 func TestRegressionCasesRepresentProductPositioning(t *testing.T) {
-	cases, err := loadCases(filepath.Join("..", "..", "prompts", "regression", "cases.json"))
+	dataset, err := loadDataset(filepath.Join("..", "..", "prompts", "regression", "cases.json"))
 	if err != nil {
-		t.Fatalf("loadCases() error = %v", err)
+		t.Fatalf("loadDataset() error = %v", err)
 	}
 
 	var corpus strings.Builder
-	for _, testCase := range cases {
+	for _, testCase := range dataset.Cases {
 		corpus.WriteString(testCase.Input)
 		corpus.WriteString(testCase.Expected)
-		corpus.WriteString(testCase.UserFactSummary)
-		for _, message := range testCase.History {
+		corpus.WriteString(testCase.Context.UserFactSummary)
+		for _, message := range testCase.Context.Messages {
 			corpus.WriteString(message.Content)
 		}
 	}

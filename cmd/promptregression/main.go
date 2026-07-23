@@ -24,14 +24,28 @@ type assertions struct {
 	MaxRunes        int        `json:"max_runes"`
 }
 
+type caseContext struct {
+	Messages        []llm.Message     `json:"messages,omitempty"`
+	Variables       map[string]string `json:"variables,omitempty"`
+	SourceChunks    []string          `json:"source_chunks,omitempty"`
+	UserFactSummary string            `json:"user_fact_summary,omitempty"`
+}
+
 type regressionCase struct {
-	ID              string        `json:"id"`
-	Category        string        `json:"category"`
-	History         []llm.Message `json:"history"`
-	Input           string        `json:"input"`
-	UserFactSummary string        `json:"user_fact_summary"`
-	Expected        string        `json:"expected"`
-	Assertions      assertions    `json:"assertions"`
+	ID         string      `json:"id"`
+	TaskType   string      `json:"task_type"`
+	Category   string      `json:"category"`
+	Input      string      `json:"input"`
+	Context    caseContext `json:"context"`
+	Expected   string      `json:"expected"`
+	Assertions assertions  `json:"assertions"`
+}
+
+type regressionDataset struct {
+	SchemaVersion  string           `json:"schema_version"`
+	DatasetVersion string           `json:"dataset_version"`
+	Name           string           `json:"name"`
+	Cases          []regressionCase `json:"cases"`
 }
 
 type caseResult struct {
@@ -82,12 +96,9 @@ func run() error {
 	if cfg.DeepSeek.APIKey == "" {
 		return errors.New("缺少 DEEPSEEK_API_KEY，未运行回归；不会生成伪造结果")
 	}
-	cases, err := loadCases(*casesPath)
+	dataset, err := loadDataset(*casesPath)
 	if err != nil {
 		return err
-	}
-	if len(cases) != 10 {
-		return fmt.Errorf("固定回归用例数量 = %d，want 10", len(cases))
 	}
 
 	baselineRaw, err := os.ReadFile(*baselinePath)
@@ -119,7 +130,7 @@ func run() error {
 		{name: "baseline", path: *baselinePath, data: baseline},
 		{name: "candidate", path: cfg.Chat.PromptPath, data: candidate},
 	} {
-		result, err := executePromptRun(context.Background(), client, target.name, target.path, target.data, cases)
+		result, err := executePromptRun(context.Background(), client, target.name, target.path, target.data, dataset.Cases)
 		if err != nil {
 			return err
 		}
@@ -150,33 +161,44 @@ func run() error {
 	return nil
 }
 
-func loadCases(path string) ([]regressionCase, error) {
+func loadDataset(path string) (regressionDataset, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("读取回归用例失败: %w", err)
+		return regressionDataset{}, fmt.Errorf("读取回归用例失败: %w", err)
 	}
-	var cases []regressionCase
-	if err := json.Unmarshal(raw, &cases); err != nil {
-		return nil, fmt.Errorf("解析回归用例失败: %w", err)
+	var dataset regressionDataset
+	if err := json.Unmarshal(raw, &dataset); err != nil {
+		return regressionDataset{}, fmt.Errorf("解析回归用例失败: %w", err)
 	}
-	for index, testCase := range cases {
-		if testCase.ID == "" || testCase.Category == "" || testCase.Input == "" || testCase.Expected == "" {
-			return nil, fmt.Errorf("回归用例 #%d 缺少 id/category/input/expected", index+1)
+	if dataset.SchemaVersion == "" || dataset.DatasetVersion == "" || dataset.Name == "" {
+		return regressionDataset{}, fmt.Errorf("评测数据集缺少 schema_version/dataset_version/name")
+	}
+	if len(dataset.Cases) == 0 {
+		return regressionDataset{}, fmt.Errorf("评测数据集没有用例")
+	}
+	seenIDs := make(map[string]struct{}, len(dataset.Cases))
+	for index, testCase := range dataset.Cases {
+		if testCase.ID == "" || testCase.TaskType == "" || testCase.Category == "" || testCase.Input == "" || testCase.Expected == "" {
+			return regressionDataset{}, fmt.Errorf("回归用例 #%d 缺少 id/task_type/category/input/expected", index+1)
 		}
+		if _, exists := seenIDs[testCase.ID]; exists {
+			return regressionDataset{}, fmt.Errorf("回归用例 id 重复: %s", testCase.ID)
+		}
+		seenIDs[testCase.ID] = struct{}{}
 	}
-	return cases, nil
+	return dataset, nil
 }
 
 func executePromptRun(ctx context.Context, client *llm.DeepSeekClient, name, templatePath string, prompt *service.ChatPrompt, cases []regressionCase) (promptRun, error) {
 	runResult := promptRun{Name: name, Version: prompt.Version(), TemplatePath: templatePath, Results: make([]caseResult, 0, len(cases))}
 	for _, testCase := range cases {
-		systemMessage, err := prompt.Render(testCase.UserFactSummary)
+		systemMessage, err := prompt.Render(testCase.Context.UserFactSummary)
 		if err != nil {
 			return promptRun{}, err
 		}
-		messages := make([]llm.Message, 0, len(testCase.History)+2)
+		messages := make([]llm.Message, 0, len(testCase.Context.Messages)+2)
 		messages = append(messages, llm.Message{Role: "system", Content: systemMessage})
-		messages = append(messages, testCase.History...)
+		messages = append(messages, testCase.Context.Messages...)
 		messages = append(messages, llm.Message{Role: "user", Content: testCase.Input})
 		var output strings.Builder
 		caseCtx, cancel := context.WithTimeout(ctx, client.Timeout())
