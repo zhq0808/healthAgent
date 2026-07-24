@@ -49,6 +49,55 @@ func (c *DeepSeekClient) ModelName() string {
 	return c.model
 }
 
+// Complete 非流式调用模型，返回完整原始文本和供应商报告的 Token 用量。
+func (c *DeepSeekClient) Complete(ctx context.Context, messages []Message) (Completion, error) {
+	if c == nil || c.apiKey == "" {
+		return Completion{}, ErrNotConfigured
+	}
+
+	body, err := json.Marshal(chatCompletionRequest{
+		Model:       c.model,
+		Messages:    messages,
+		Stream:      false,
+		Temperature: c.temperature,
+	})
+	if err != nil {
+		return Completion{}, fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return Completion{}, fmt.Errorf("构造请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return Completion{}, fmt.Errorf("调用大模型失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if err != nil {
+		return Completion{}, fmt.Errorf("读取大模型响应失败: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return Completion{}, fmt.Errorf("大模型返回非 200 状态: %d, body: %s", resp.StatusCode, raw)
+	}
+	var result chatCompletionResponse
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return Completion{}, fmt.Errorf("解析大模型响应失败: %w", err)
+	}
+	if result.Error != nil {
+		return Completion{}, fmt.Errorf("大模型返回错误: %s", result.Error.Message)
+	}
+	if len(result.Choices) == 0 {
+		return Completion{}, fmt.Errorf("大模型响应缺少 choices")
+	}
+	return Completion{Content: result.Choices[0].Message.Content, Usage: result.Usage}, nil
+}
+
 // Stream 以流式方式调用大模型：DeepSeek 每生成一段文本就回调 onDelta。
 //
 // onDelta 返回 error 时（例如下游客户端已断开、写回失败）立即停止读取并把该 error 透传出去，

@@ -1,0 +1,30 @@
+dataset_path: prompts/regression/cases.json
+
+# Empty means all task types. Override with -task-types=a,b for a focused run.
+task_types: []
+
+targets:
+  - name: baseline
+    parameters:
+      temperature: 0
+    prompts:
+      default:
+        path: prompts/interview_chat_v1.tmpl
+        version: interview-chat-v1
+
+  - name: candidate
+    parameters:
+      temperature: 0
+    prompts:
+      default:
+        path: prompts/regression/knowledge_tasks_v1.tmpl
+        version: knowledge-tasks-v1
+
+# Deterministic assertions remain authoritative. Enable this only for auxiliary review.
+judge:
+  enabled: false
+  temperature: 0
+
+reports:
+  json_path: docs/0723/prompt-regression-results.json
+  markdown_path: docs/0723/prompt-regression-results.md
